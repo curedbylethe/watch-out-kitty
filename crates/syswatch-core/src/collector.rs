@@ -131,9 +131,10 @@ fn snapshot_at(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    use std::process::Command;
     use std::{
         ffi::OsStr,
-        process::Command,
         time::{Duration, Instant},
     };
 
@@ -254,6 +255,7 @@ mod tests {
         assert!(process.name.contains('\u{fffd}'));
     }
 
+    #[cfg(unix)]
     #[test]
     fn collector_refresh_tolerates_process_exit() {
         let mut collector = Collector::new().unwrap();
