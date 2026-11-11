@@ -75,13 +75,13 @@ Per-process CPU can exceed 100% when a process uses multiple cores. The first
 CPU sample is not representative. Memory reports occupied physical RAM, not
 macOS memory pressure. All values are point-in-time samples. Process names may
 contain replacement characters and are shortened to 24 characters. The daemon
-keeps its last successful sample in memory between refreshes. External access
-to the cached sample is planned for issue #22. Process data can be older than
-aggregate data; the `*_updated_at_ms` fields show sample times.
+keeps its last successful sample in memory between refreshes. The daemon exposes
+cached samples through the per-user socket described above. Process data can be
+older than aggregate data; the `*_updated_at_ms` fields show sample times.
 
 ## Protocol
 
-The planned socket server and command-line client exchange one UTF-8 JSON
+The socket server and planned command-line client exchange one UTF-8 JSON
 value per line. Each request and reply uses one line with no embedded newline.
 Clients send one request per line and read each reply through its line ending.
 Requests over 4096 bytes are rejected. A transport reader must cap buffered
