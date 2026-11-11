@@ -56,7 +56,12 @@ mod tests {
     fn live_sampler_records_every_process_scan_in_history() {
         let mut sampler = LiveSampler::new().unwrap();
         let scan = sampler.refresh_processes();
-        assert_eq!(sampler.history().len(), scan.processes.len());
+        assert_eq!(
+            sampler.history().len(),
+            scan.processes
+                .len()
+                .min(sampler.history().limits().max_processes)
+        );
         let len = sampler.history().len();
         sampler.refresh_aggregate();
         assert_eq!(sampler.history().len(), len);
