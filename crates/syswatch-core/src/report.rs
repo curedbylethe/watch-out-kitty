@@ -115,12 +115,14 @@ mod tests {
             &[process(2, "two", 1024, 1.5), process(1, "one", 2048, 0.0)],
             10,
         );
-        let lines: Vec<_> = table.lines().collect();
-        assert_eq!(lines.len(), 3);
-        assert!(lines[0].contains("PID"));
-        assert!(lines[0].contains("MEMORY"));
-        assert!(lines[1].contains("2.0 KiB"));
-        assert!(lines[2].contains("1.0 KiB"));
+        assert_eq!(
+            table,
+            concat!(
+                "PID     NAME                         MEMORY      CPU\n",
+                "1       one                         2.0 KiB     0.0%\n",
+                "2       two                         1.0 KiB     1.5%"
+            )
+        );
     }
 
     #[test]
