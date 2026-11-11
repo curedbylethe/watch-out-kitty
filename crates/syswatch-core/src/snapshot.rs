@@ -39,3 +39,61 @@ pub struct ProcessSnapshot {
     /// Process identity is `(pid, start_time_secs)` because operating systems reuse PIDs.
     pub start_time_secs: u64,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{MemorySnapshot, ProcessSnapshot, SystemSnapshot};
+
+    #[test]
+    fn system_snapshot_round_trips() {
+        let snapshot = SystemSnapshot {
+            timestamp_ms: 1_700_000_000_123,
+            cpu_usage_percent: 42.5,
+            memory: MemorySnapshot {
+                total_bytes: 16_000,
+                used_bytes: 8_000,
+            },
+            processes: vec![
+                ProcessSnapshot {
+                    pid: 42,
+                    parent_pid: Some(1),
+                    name: "worker".into(),
+                    cpu_usage_percent: 125.0,
+                    memory_bytes: 4_000,
+                    start_time_secs: 1_699_999_999,
+                },
+                ProcessSnapshot {
+                    pid: 43,
+                    parent_pid: Some(42),
+                    name: "child".into(),
+                    cpu_usage_percent: 1.25,
+                    memory_bytes: 2_000,
+                    start_time_secs: 1_700_000_000,
+                },
+            ],
+        };
+
+        let serialized = serde_json::to_string(&snapshot).unwrap();
+        let deserialized: SystemSnapshot = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized, snapshot);
+    }
+
+    #[test]
+    fn process_snapshot_round_trips_without_parent() {
+        let process = ProcessSnapshot {
+            pid: 42,
+            parent_pid: None,
+            name: "worker".into(),
+            cpu_usage_percent: 0.0,
+            memory_bytes: 0,
+            start_time_secs: 1_700_000_000,
+        };
+
+        let serialized = serde_json::to_string(&process).unwrap();
+        let deserialized: ProcessSnapshot = serde_json::from_str(&serialized).unwrap();
+
+        assert_eq!(deserialized.parent_pid, None);
+        assert_eq!(deserialized, process);
+    }
+}
