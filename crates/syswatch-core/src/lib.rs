@@ -1,6 +1,7 @@
 //! Core types and logic for syswatch.
 
 pub mod collector;
+pub mod report;
 pub mod snapshot;
 pub use collector::Collector;
 pub use snapshot::{MemorySnapshot, ProcessSnapshot, SystemSnapshot};
