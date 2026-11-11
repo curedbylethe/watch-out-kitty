@@ -128,9 +128,13 @@ fn snapshot_at(
 
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
+    use std::{
+        ffi::OsStr,
+        process::Command,
+        time::{Duration, Instant},
+    };
 
-    use super::{Collector, cpu_refresh_due, snapshot_at};
+    use super::{Collector, cpu_refresh_due, process_snapshot, snapshot_at};
     use crate::snapshot::{MemorySnapshot, ProcessSnapshot};
 
     #[test]
@@ -201,6 +205,74 @@ mod tests {
                 .processes
                 .iter()
                 .any(|process| process.pid == std::process::id())
+        );
+    }
+
+    #[test]
+    fn process_snapshot_copies_fields() {
+        let process = process_snapshot(
+            42,
+            Some(1),
+            OsStr::new("worker"),
+            125.5,
+            4096,
+            1_700_000_000,
+        );
+
+        assert_eq!(process.pid, 42);
+        assert_eq!(process.parent_pid, Some(1));
+        assert_eq!(process.name, "worker");
+        assert_eq!(process.cpu_usage_percent, 125.5);
+        assert_eq!(process.memory_bytes, 4096);
+        assert_eq!(process.start_time_secs, 1_700_000_000);
+    }
+
+    #[test]
+    fn process_snapshot_preserves_missing_parent() {
+        let process = process_snapshot(42, None, OsStr::new("worker"), 0.0, 0, 1_700_000_000);
+
+        assert_eq!(process.parent_pid, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn process_snapshot_lossy_decodes_non_utf8_name() {
+        use std::os::unix::ffi::OsStrExt;
+
+        let process = process_snapshot(
+            42,
+            None,
+            OsStr::from_bytes(b"\xffworker"),
+            0.0,
+            0,
+            1_700_000_000,
+        );
+
+        assert!(process.name.contains('\u{fffd}'));
+    }
+
+    #[test]
+    fn collector_refresh_tolerates_process_exit() {
+        let mut collector = Collector::new().unwrap();
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id();
+
+        assert!(
+            collector
+                .refresh()
+                .processes
+                .iter()
+                .any(|process| process.pid == pid)
+        );
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        assert!(
+            !collector
+                .refresh()
+                .processes
+                .iter()
+                .any(|process| process.pid == pid)
         );
     }
 }
