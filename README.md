@@ -20,6 +20,15 @@ processes using the most memory, then exits. The daemon runs in the foreground.
 Ctrl-C (SIGINT) or SIGTERM stops it cleanly, prints `syswatch-daemon: stopped`,
 and exits with status 0. CI currently runs on Ubuntu 24.04.
 
+### Daemon socket
+
+The daemon socket path is `$SYSWATCH_SOCKET` when set to an absolute path,
+otherwise `$XDG_RUNTIME_DIR/syswatch.sock`, otherwise
+`$HOME/.local/run/syswatch.sock`. The daemon creates a missing final directory
+with mode `0700` and refuses directories accessible by other users. The socket
+has mode `0600`. The daemon does not listen on TCP. A client sends one JSON
+request line per connection; the server closes the connection after its reply.
+
 ## Current scope
 
 This repository contains the telemetry crate, snapshot example, and foreground
