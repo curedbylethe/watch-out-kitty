@@ -98,9 +98,21 @@ pub fn request_status(path: &Path, timeout: Duration) -> Result<Response, Client
             Err(error) => return Err(io_error(error, "read", path, timeout)),
         }
     }
-    if bytes.len() > MAX_RESPONSE_BYTES || bytes.last() != Some(&b'\n') {
+    if bytes.is_empty() {
         return Err(ClientError::InvalidResponse(format!(
-            "invalid response from daemon at {}: missing line ending or response exceeds {MAX_RESPONSE_BYTES} bytes",
+            "invalid response from daemon at {}: daemon closed the connection without a response",
+            path.display()
+        )));
+    }
+    if bytes.len() > MAX_RESPONSE_BYTES {
+        return Err(ClientError::InvalidResponse(format!(
+            "invalid response from daemon at {}: response exceeds {MAX_RESPONSE_BYTES} bytes",
+            path.display()
+        )));
+    }
+    if bytes.last() != Some(&b'\n') {
+        return Err(ClientError::InvalidResponse(format!(
+            "invalid response from daemon at {}: missing line ending",
             path.display()
         )));
     }
@@ -277,6 +289,25 @@ mod tests {
             ));
             server.join().unwrap();
         }
+    }
+
+    #[test]
+    fn closed_connection_reports_missing_response() {
+        let (socket, listener) = Socket::new();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            io::BufReader::new(&mut stream)
+                .read_line(&mut request)
+                .unwrap();
+        });
+        let error = request_status(&socket.0, Duration::from_secs(1)).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("closed the connection without a response")
+        );
+        server.join().unwrap();
     }
 
     #[test]
