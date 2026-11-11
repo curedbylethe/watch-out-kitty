@@ -1,8 +1,11 @@
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::{
+    ffi::OsStr,
+    time::{Instant, SystemTime, UNIX_EPOCH},
+};
 
-use sysinfo::{MemoryRefreshKind, System};
+use sysinfo::{MemoryRefreshKind, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
-use crate::snapshot::{MemorySnapshot, SystemSnapshot};
+use crate::snapshot::{MemorySnapshot, ProcessSnapshot, SystemSnapshot};
 
 /// Stateful collector for aggregate CPU and physical-memory usage.
 pub struct Collector {
@@ -26,7 +29,8 @@ impl Collector {
     /// The first call primes CPU counters and reports `0.0`; a later call at
     /// least `sysinfo::MINIMUM_CPU_UPDATE_INTERVAL` later reports CPU usage.
     /// Calls inside that interval reuse the prior CPU value. On macOS,
-    /// occupied RAM does not equal memory pressure.
+    /// occupied RAM does not equal memory pressure. The first per-process CPU
+    /// sample may not be representative.
     pub fn refresh(&mut self) -> SystemSnapshot {
         let now = Instant::now();
         let cpu_refresh_due = cpu_refresh_due(self.last_cpu_refresh, now);
@@ -42,11 +46,38 @@ impl Collector {
             self.last_cpu_refresh = Some(Instant::now());
         }
 
+        self.system.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::nothing().with_cpu().with_memory(),
+        );
+
+        let processes = self
+            .system
+            .processes()
+            .values()
+            .map(|process| {
+                process_snapshot(
+                    process.pid().as_u32(),
+                    process.parent().map(Pid::as_u32),
+                    process.name(),
+                    process.cpu_usage(),
+                    process.memory(),
+                    process.start_time(),
+                )
+            })
+            .collect();
+
         let memory = MemorySnapshot {
             total_bytes: self.system.total_memory(),
             used_bytes: self.system.used_memory(),
         };
-        snapshot_at(timestamp_ms(), self.last_cpu_usage_percent, memory)
+        snapshot_at(
+            timestamp_ms(),
+            self.last_cpu_usage_percent,
+            memory,
+            processes,
+        )
     }
 }
 
@@ -63,16 +94,35 @@ fn timestamp_ms() -> u64 {
         .as_millis() as u64
 }
 
+fn process_snapshot(
+    pid: u32,
+    parent_pid: Option<u32>,
+    name: &OsStr,
+    cpu_usage_percent: f32,
+    memory_bytes: u64,
+    start_time_secs: u64,
+) -> ProcessSnapshot {
+    ProcessSnapshot {
+        pid,
+        parent_pid,
+        name: name.to_string_lossy().into_owned(),
+        cpu_usage_percent,
+        memory_bytes,
+        start_time_secs,
+    }
+}
+
 fn snapshot_at(
     timestamp_ms: u64,
     cpu_usage_percent: f32,
     memory: MemorySnapshot,
+    processes: Vec<ProcessSnapshot>,
 ) -> SystemSnapshot {
     SystemSnapshot {
         timestamp_ms,
         cpu_usage_percent,
         memory,
-        processes: Vec::new(),
+        processes,
     }
 }
 
@@ -81,7 +131,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{Collector, cpu_refresh_due, snapshot_at};
-    use crate::snapshot::MemorySnapshot;
+    use crate::snapshot::{MemorySnapshot, ProcessSnapshot};
 
     #[test]
     fn cpu_refresh_is_due_without_a_previous_sample() {
@@ -112,26 +162,45 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_mapping_copies_values_and_has_no_processes() {
+    fn snapshot_mapping_copies_values_and_processes() {
         let memory = MemorySnapshot {
             total_bytes: 16_000,
             used_bytes: 8_000,
         };
-        let snapshot = snapshot_at(123, 42.5, memory.clone());
+        let processes = vec![ProcessSnapshot {
+            pid: 42,
+            parent_pid: Some(1),
+            name: "worker".into(),
+            cpu_usage_percent: 125.5,
+            memory_bytes: 4096,
+            start_time_secs: 1_700_000_000,
+        }];
+        let snapshot = snapshot_at(123, 42.5, memory.clone(), processes.clone());
 
         assert_eq!(snapshot.timestamp_ms, 123);
         assert_eq!(snapshot.cpu_usage_percent, 42.5);
         assert_eq!(snapshot.memory, memory);
-        assert!(snapshot.processes.is_empty());
+        assert_eq!(snapshot.processes, processes);
     }
 
     #[test]
-    fn collector_refresh_returns_snapshot_without_processes() {
+    fn collector_refresh_returns_snapshot_with_processes() {
         let mut collector = Collector::new().unwrap();
 
         let first = collector.refresh();
         assert_eq!(first.cpu_usage_percent, 0.0);
-        assert!(first.processes.is_empty());
-        assert!(collector.refresh().processes.is_empty());
+        assert!(
+            first
+                .processes
+                .iter()
+                .any(|process| process.pid == std::process::id())
+        );
+        assert!(
+            collector
+                .refresh()
+                .processes
+                .iter()
+                .any(|process| process.pid == std::process::id())
+        );
     }
 }
