@@ -15,6 +15,19 @@ pub struct SystemSnapshot {
     pub processes_updated_at_ms: Option<u64>,
 }
 
+/// Aggregate CPU and memory measurements without process observations.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AggregateSnapshot {
+    /// Memory observation time in milliseconds since the Unix epoch.
+    pub timestamp_ms: u64,
+    /// Aggregate CPU usage across all cores, from 0 to 100 percent.
+    pub cpu_usage_percent: f32,
+    /// Time when CPU usage was last sampled; can be older or `None` during warm-up.
+    pub cpu_updated_at_ms: Option<u64>,
+    /// Physical memory measurements reported by the operating system.
+    pub memory: MemorySnapshot,
+}
+
 /// Physical memory measurements reported by the operating system.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MemorySnapshot {

@@ -4,7 +4,7 @@ pub mod collector;
 pub mod report;
 pub mod snapshot;
 pub use collector::Collector;
-pub use snapshot::{MemorySnapshot, ProcessSnapshot, SystemSnapshot};
+pub use snapshot::{AggregateSnapshot, MemorySnapshot, ProcessSnapshot, SystemSnapshot};
 
 #[cfg(test)]
 mod tests {
