@@ -190,7 +190,7 @@ pub fn decode_request(line: &str) -> Result<Request, ProtocolError> {
     };
 
     Ok(Request {
-        version: head.version,
+        version: raw.version,
         command,
     })
 }
