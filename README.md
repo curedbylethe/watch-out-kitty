@@ -33,7 +33,7 @@ PID     NAME                         MEMORY      CPU
 
 This example is a diagnostic tool, not a permanent CLI.
 
-## Comparing Activity Monitor
+## Comparing with Activity Monitor
 
 Global CPU usage is an aggregate from 0% to 100%. Per-process CPU can exceed
 100% because one fully used core counts as 100%. Used RAM reports occupied
