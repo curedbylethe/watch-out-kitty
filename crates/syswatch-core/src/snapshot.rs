@@ -7,7 +7,7 @@ pub struct SystemSnapshot {
     pub cpu_usage_percent: f32,
     /// Physical memory measurements reported by the operating system.
     pub memory: MemorySnapshot,
-    /// Process observations; empty when process collection was not performed.
+    /// Process observations; empty when collection was not performed. Order is unspecified.
     pub processes: Vec<ProcessSnapshot>,
 }
 
@@ -51,6 +51,13 @@ pub struct ProcessSnapshot {
     /// Process start time in seconds since the Unix epoch.
     /// Process identity is `(pid, start_time_secs)` because operating systems reuse PIDs.
     pub start_time_secs: u64,
+}
+
+impl ProcessSnapshot {
+    /// Returns the stable identity pair because operating systems reuse PIDs.
+    pub fn identity(&self) -> (u32, u64) {
+        (self.pid, self.start_time_secs)
+    }
 }
 
 #[cfg(test)]
