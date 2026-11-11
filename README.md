@@ -43,6 +43,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | --- | --- |
 | `crates/syswatch-core` | Telemetry library |
 | `crates/syswatch-core/src/collector.rs` | System sampling |
+| `crates/syswatch-core/src/config.rs` | Validated monitoring intervals |
 | `crates/syswatch-core/src/snapshot.rs` | CPU, memory, and process data types |
 | `crates/syswatch-core/src/report.rs` | Human-readable formatting |
 | `crates/syswatch-core/examples/snapshot.rs` | One-time snapshot example |
