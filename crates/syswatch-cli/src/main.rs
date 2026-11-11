@@ -16,10 +16,22 @@ fn main() {
             std::process::exit(2);
         }
     };
-    if command == args::Command::Help {
-        println!("{}", args::USAGE);
-        return;
-    }
+    let (request_command, sort, limit) = match command {
+        args::Command::Status => (syswatch_core::protocol::RequestCommand::Status, None, 0),
+        args::Command::Top { sort, limit } => (
+            syswatch_core::protocol::RequestCommand::Processes,
+            Some(sort),
+            limit,
+        ),
+        args::Command::Help => {
+            println!("{}", args::USAGE);
+            return;
+        }
+        args::Command::TopHelp => {
+            println!("{}", args::TOP_USAGE);
+            return;
+        }
+    };
     let path = match syswatch_core::ipc::socket_path() {
         Ok(path) => path,
         Err(error) => {
@@ -27,7 +39,7 @@ fn main() {
             std::process::exit(1);
         }
     };
-    let response = match client::request_status(&path, client::TIMEOUT) {
+    let response = match client::request(&path, request_command, client::TIMEOUT) {
         Ok(response) => response,
         Err(error) => {
             eprintln!("syswatch: {error}");
@@ -39,8 +51,12 @@ fn main() {
         .unwrap_or_default()
         .as_millis()
         .min(u64::MAX as u128) as u64;
-    match output::render_status(&response, now_ms) {
-        Ok(status) => println!("{status}"),
+    let rendered = match sort {
+        Some(sort) => output::render_top(&response, sort, limit, now_ms),
+        None => output::render_status(&response, now_ms),
+    };
+    match rendered {
+        Ok(output) => println!("{output}"),
         Err(error) => {
             eprintln!("syswatch: {error}");
             std::process::exit(1);

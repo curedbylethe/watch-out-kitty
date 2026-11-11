@@ -1,6 +1,6 @@
 use syswatch_core::{
     protocol::{ErrorCode, Response},
-    report::{format_bytes, format_cpu_percent},
+    report::{self, ProcessSort, format_bytes, format_cpu_percent},
 };
 
 pub fn render_status(response: &Response, now_ms: u64) -> Result<String, String> {
@@ -43,6 +43,33 @@ pub fn render_status(response: &Response, now_ms: u64) -> Result<String, String>
     ))
 }
 
+pub fn render_top(
+    response: &Response,
+    sort: ProcessSort,
+    limit: usize,
+    now_ms: u64,
+) -> Result<String, String> {
+    match response {
+        Response::Processes {
+            processes_updated_at_ms,
+            processes,
+            ..
+        } => Ok(format!(
+            "{}\n{}",
+            report::render_table(processes, sort, limit),
+            report::format_process_age(now_ms, Some(*processes_updated_at_ms))
+        )),
+        Response::Error {
+            code: ErrorCode::Unavailable,
+            ..
+        } => Ok(report::format_process_age(now_ms, None)),
+        Response::Error { code, message, .. } => {
+            Err(format!("daemon error ({}): {message}", error_code(code)))
+        }
+        _ => Err("invalid response from daemon: expected processes response".to_owned()),
+    }
+}
+
 fn error_code(code: &ErrorCode) -> &'static str {
     match code {
         ErrorCode::UnsupportedVersion => "unsupported_version",
@@ -58,12 +85,33 @@ pub fn format_age_ms(now_ms: u64, then_ms: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_age_ms, render_status};
+    use super::{format_age_ms, render_status, render_top};
     use syswatch_core::{
         MemorySnapshot,
-        protocol::{PROTOCOL_VERSION, Response},
-        snapshot::AggregateSnapshot,
+        protocol::{ErrorCode, PROTOCOL_VERSION, ProtocolError, Response},
+        report::ProcessSort,
+        snapshot::{AggregateSnapshot, ProcessSnapshot},
     };
+
+    fn process(pid: u32, name: &str, memory_bytes: u64, cpu_usage_percent: f32) -> ProcessSnapshot {
+        ProcessSnapshot {
+            pid,
+            parent_pid: None,
+            name: name.to_owned(),
+            cpu_usage_percent,
+            memory_bytes,
+            start_time_secs: 1,
+        }
+    }
+
+    fn processes(processes: Vec<ProcessSnapshot>) -> Response {
+        Response::Processes {
+            version: PROTOCOL_VERSION,
+            observed_at_ms: 1_700_000_000_123,
+            processes_updated_at_ms: 1_700_000_000_023,
+            processes,
+        }
+    }
 
     fn status(cpu_updated_at_ms: Option<u64>, process_count: Option<usize>) -> Response {
         Response::Status {
@@ -132,5 +180,84 @@ mod tests {
             render_status(&response, 0).unwrap_err(),
             "daemon error (malformed_request): bad"
         );
+    }
+
+    #[test]
+    fn top_renders_memory_order_and_equal_memory_by_pid() {
+        let response = processes(vec![
+            process(3, "three", 20, 1.0),
+            process(2, "two", 20, 2.0),
+            process(1, "one", 10, 3.0),
+        ]);
+        let rendered = render_top(&response, ProcessSort::Memory, 10, 1_700_000_000_523).unwrap();
+        let rows = rendered.lines().skip(1).take(3).collect::<Vec<_>>();
+        assert!(rows[0].starts_with("2"));
+        assert!(rows[1].starts_with("3"));
+        assert!(rows[2].starts_with("1"));
+    }
+
+    #[test]
+    fn top_renders_cpu_order_and_applies_limit_before_age_line() {
+        let response = processes(vec![
+            process(1, "one", 100, 50.0),
+            process(2, "two", 200, 125.0),
+            process(3, "three", 300, 90.0),
+        ]);
+        let rendered = render_top(&response, ProcessSort::Cpu, 2, 1_700_000_000_523).unwrap();
+        let rows = rendered.lines().skip(1).collect::<Vec<_>>();
+        assert!(rows[0].starts_with("2"));
+        assert!(rows[0].ends_with("125.0%"));
+        assert!(rows[1].starts_with("3"));
+        assert_eq!(rows[2], "process data: 0.5 s old");
+    }
+
+    #[test]
+    fn top_renders_empty_dated_data() {
+        assert_eq!(
+            render_top(&processes(Vec::new()), ProcessSort::Memory, 10, 100).unwrap(),
+            "(no processes observed)\nprocess data: 0.0 s old"
+        );
+    }
+
+    #[test]
+    fn top_renders_unavailable_data() {
+        let unavailable = Response::error(ProtocolError {
+            code: ErrorCode::Unavailable,
+            message: "not sampled".to_owned(),
+        });
+        assert_eq!(
+            render_top(&unavailable, ProcessSort::Cpu, 10, 100).unwrap(),
+            "process data: unavailable"
+        );
+    }
+
+    #[test]
+    fn top_reports_daemon_errors_and_wrong_response_kind() {
+        let error = Response::error(ProtocolError {
+            code: ErrorCode::MalformedRequest,
+            message: "bad".to_owned(),
+        });
+        assert_eq!(
+            render_top(&error, ProcessSort::Memory, 10, 0).unwrap_err(),
+            "daemon error (malformed_request): bad"
+        );
+        assert!(
+            render_top(&status(Some(1), Some(1)), ProcessSort::Memory, 10, 0)
+                .unwrap_err()
+                .contains("expected processes response")
+        );
+    }
+
+    #[test]
+    fn top_renders_nonfinite_cpu_as_na_and_ranks_it_last() {
+        let response = processes(vec![
+            process(1, "nan", 0, f32::NAN),
+            process(2, "finite", 0, 1.0),
+        ]);
+        let rendered = render_top(&response, ProcessSort::Cpu, 10, 1_700_000_000_023).unwrap();
+        let rows = rendered.lines().skip(1).take(2).collect::<Vec<_>>();
+        assert!(rows[0].starts_with("2"));
+        assert!(rows[1].starts_with("1"));
+        assert!(rows[1].ends_with("n/a"));
     }
 }

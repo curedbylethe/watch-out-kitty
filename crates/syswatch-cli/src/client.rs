@@ -37,7 +37,11 @@ impl std::fmt::Display for ClientError {
     }
 }
 
-pub fn request_status(path: &Path, timeout: Duration) -> Result<Response, ClientError> {
+pub fn request(
+    path: &Path,
+    command: RequestCommand,
+    timeout: Duration,
+) -> Result<Response, ClientError> {
     let mut stream = UnixStream::connect(path).map_err(|error| {
         let message = if error.kind() == io::ErrorKind::NotFound {
             format!("cannot connect to daemon at {}: no such file or directory; syswatch-daemon running?", path.display())
@@ -52,7 +56,7 @@ pub fn request_status(path: &Path, timeout: Duration) -> Result<Response, Client
 
     let mut request = protocol::encode_line(&Request {
         version: protocol::PROTOCOL_VERSION,
-        command: RequestCommand::Status,
+        command,
     })
     .map_err(|error| ClientError::Encode(format!("cannot encode request: {error}")))?;
     request.push('\n');
@@ -221,7 +225,36 @@ mod tests {
             assert_eq!(request, "{\"version\":1,\"command\":\"status\"}\n");
             stream.write_all(wire.as_bytes()).unwrap();
         });
-        let response = request_status(&_socket.0, Duration::from_secs(1)).unwrap();
+        let response = request(&_socket.0, RequestCommand::Status, Duration::from_secs(1)).unwrap();
+        assert_eq!(response, expected);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn sends_one_processes_request_and_decodes_response() {
+        let (_socket, listener) = Socket::new();
+        let expected = Response::Processes {
+            version: protocol::PROTOCOL_VERSION,
+            observed_at_ms: 1_700_000_000_123,
+            processes_updated_at_ms: 1_700_000_000_100,
+            processes: Vec::new(),
+        };
+        let wire = format!("{}\n", protocol::encode_line(&expected).unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            io::BufReader::new(&mut stream)
+                .read_line(&mut request)
+                .unwrap();
+            assert_eq!(request, "{\"version\":1,\"command\":\"processes\"}\n");
+            stream.write_all(wire.as_bytes()).unwrap();
+        });
+        let response = request(
+            &_socket.0,
+            RequestCommand::Processes,
+            Duration::from_secs(1),
+        )
+        .unwrap();
         assert_eq!(response, expected);
         server.join().unwrap();
     }
@@ -230,14 +263,16 @@ mod tests {
     fn missing_socket_has_daemon_hint() {
         let path =
             std::env::temp_dir().join(format!("syswatch-cli-missing-{}.sock", std::process::id()));
-        let error = request_status(&path, TIMEOUT).unwrap_err();
+        let error = request(&path, RequestCommand::Status, TIMEOUT).unwrap_err();
         assert!(error.to_string().contains("syswatch-daemon running?"));
     }
 
     #[test]
     fn other_connect_errors_name_the_daemon_path() {
         let path = std::path::PathBuf::from(format!("/{}", "x".repeat(200)));
-        let error = request_status(&path, TIMEOUT).unwrap_err().to_string();
+        let error = request(&path, RequestCommand::Status, TIMEOUT)
+            .unwrap_err()
+            .to_string();
         assert!(error.starts_with(&format!("cannot connect to daemon at {}:", path.display())));
     }
 
@@ -248,7 +283,8 @@ mod tests {
             let (_stream, _) = listener.accept().unwrap();
             thread::sleep(Duration::from_millis(150));
         });
-        let error = request_status(&socket.0, Duration::from_millis(30)).unwrap_err();
+        let error =
+            request(&socket.0, RequestCommand::Status, Duration::from_millis(30)).unwrap_err();
         assert!(matches!(&error, ClientError::Timeout(_)));
         assert!(error.to_string().contains(&socket.0.display().to_string()));
         server.join().unwrap();
@@ -278,7 +314,8 @@ mod tests {
                 thread::sleep(Duration::from_millis(10));
             }
         });
-        let error = request_status(&socket.0, Duration::from_millis(60)).unwrap_err();
+        let error =
+            request(&socket.0, RequestCommand::Status, Duration::from_millis(60)).unwrap_err();
         assert!(matches!(error, ClientError::Timeout(_)));
         server.join().unwrap();
     }
@@ -294,7 +331,7 @@ mod tests {
                 stream.write_all(response).unwrap();
             });
             assert!(matches!(
-                request_status(&_socket.0, Duration::from_secs(1)),
+                request(&_socket.0, RequestCommand::Status, Duration::from_secs(1)),
                 Err(ClientError::InvalidResponse(_))
             ));
             server.join().unwrap();
@@ -311,7 +348,7 @@ mod tests {
                 .read_line(&mut request)
                 .unwrap();
         });
-        let error = request_status(&socket.0, Duration::from_secs(1)).unwrap_err();
+        let error = request(&socket.0, RequestCommand::Status, Duration::from_secs(1)).unwrap_err();
         assert!(
             error
                 .to_string()
@@ -330,7 +367,7 @@ mod tests {
             let _ = stream.write_all(&vec![b'x'; MAX_RESPONSE_BYTES + 1]);
         });
         assert!(matches!(
-            request_status(&_socket.0, Duration::from_secs(1)),
+            request(&_socket.0, RequestCommand::Status, Duration::from_secs(1)),
             Err(ClientError::InvalidResponse(_))
         ));
         server.join().unwrap();
@@ -346,7 +383,7 @@ mod tests {
             stream.write_all(b"{\"kind\":\"error\",\"version\":2,\"code\":\"unavailable\",\"message\":\"x\"}\n").unwrap();
         });
         assert!(matches!(
-            request_status(&_socket.0, Duration::from_secs(1)),
+            request(&_socket.0, RequestCommand::Status, Duration::from_secs(1)),
             Err(ClientError::ProtocolMismatch { found: 2, .. })
         ));
         server.join().unwrap();
