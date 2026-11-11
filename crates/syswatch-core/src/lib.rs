@@ -3,6 +3,7 @@
 pub mod collector;
 pub mod config;
 pub mod history;
+pub mod protocol;
 pub mod report;
 pub mod snapshot;
 pub use collector::Collector;
