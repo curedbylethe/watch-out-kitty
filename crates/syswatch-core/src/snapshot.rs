@@ -16,7 +16,7 @@ pub struct SystemSnapshot {
 }
 
 /// Aggregate CPU and memory measurements without process observations.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct AggregateSnapshot {
     /// Memory observation time in milliseconds since the Unix epoch.
     pub timestamp_ms: u64,
