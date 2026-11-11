@@ -51,8 +51,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-core/src/report.rs` | Human-readable formatting |
 | `crates/syswatch-core/examples/snapshot.rs` | One-time snapshot example |
 | `crates/syswatch-daemon` | Foreground monitoring daemon |
+| `crates/syswatch-daemon/src/clock.rs` | Interruptible monotonic clock |
 | `crates/syswatch-daemon/src/scheduler.rs` | Independent sampling schedule |
 | `crates/syswatch-daemon/src/latest.rs` | Cached latest snapshot |
+| `crates/syswatch-daemon/src/sampler.rs` | Collector and process-history owner |
+| `crates/syswatch-daemon/src/signals.rs` | SIGINT and SIGTERM handling |
 | `.github/workflows/ci.yml` | Ubuntu build checks |
 | `LICENSE` | Apache-2.0 license |
 
