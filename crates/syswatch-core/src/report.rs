@@ -2,6 +2,13 @@
 
 use crate::snapshot::ProcessSnapshot;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ProcessSort {
+    #[default]
+    Memory,
+    Cpu,
+}
+
 /// Formats a byte count with binary units, from bytes through tebibytes.
 pub fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -29,9 +36,9 @@ pub fn format_cpu_percent(value: f32) -> String {
     }
 }
 
-/// Renders up to `limit` processes, ordered by memory descending and PID ascending.
-pub fn render_table(processes: &[ProcessSnapshot], limit: usize) -> String {
-    let rows = top_by_memory(processes, limit);
+/// Renders up to `limit` processes in the selected order.
+pub fn render_table(processes: &[ProcessSnapshot], sort: ProcessSort, limit: usize) -> String {
+    let rows = top_by_sort(processes, sort, limit);
     if rows.is_empty() {
         return "(no processes observed)".to_owned();
     }
@@ -44,12 +51,38 @@ pub fn render_table(processes: &[ProcessSnapshot], limit: usize) -> String {
     lines.join("\n")
 }
 
-fn top_by_memory(processes: &[ProcessSnapshot], limit: usize) -> Vec<&ProcessSnapshot> {
+pub fn format_process_age(now_ms: u64, processes_updated_at_ms: Option<u64>) -> String {
+    match processes_updated_at_ms {
+        Some(timestamp_ms) => format!(
+            "process data: {:.1} s old",
+            now_ms.saturating_sub(timestamp_ms) as f64 / 1000.0
+        ),
+        None => "process data: unavailable".to_owned(),
+    }
+}
+
+fn top_by_sort(
+    processes: &[ProcessSnapshot],
+    sort: ProcessSort,
+    limit: usize,
+) -> Vec<&ProcessSnapshot> {
     let mut rows: Vec<_> = processes.iter().collect();
     rows.sort_by(|a, b| {
-        b.memory_bytes
-            .cmp(&a.memory_bytes)
+        let primary = match sort {
+            ProcessSort::Memory => b.memory_bytes.cmp(&a.memory_bytes),
+            ProcessSort::Cpu => match (
+                a.cpu_usage_percent.is_finite(),
+                b.cpu_usage_percent.is_finite(),
+            ) {
+                (true, true) => b.cpu_usage_percent.total_cmp(&a.cpu_usage_percent),
+                (true, false) => std::cmp::Ordering::Less,
+                (false, true) => std::cmp::Ordering::Greater,
+                (false, false) => std::cmp::Ordering::Equal,
+            },
+        };
+        primary
             .then_with(|| a.pid.cmp(&b.pid))
+            .then_with(|| a.start_time_secs.cmp(&b.start_time_secs))
     });
     rows.truncate(limit);
     rows
@@ -76,7 +109,10 @@ fn truncate_name(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_bytes, format_cpu_percent, render_table, top_by_memory, truncate_name};
+    use super::{
+        ProcessSort, format_bytes, format_cpu_percent, format_process_age, render_table,
+        top_by_sort, truncate_name,
+    };
     use crate::snapshot::ProcessSnapshot;
 
     fn process(pid: u32, name: &str, memory_bytes: u64, cpu_usage_percent: f32) -> ProcessSnapshot {
@@ -99,21 +135,69 @@ mod tests {
         ];
 
         assert_eq!(
-            top_by_memory(&processes, 2)
+            top_by_sort(&processes, ProcessSort::Memory, 2)
                 .iter()
                 .map(|process| process.pid)
                 .collect::<Vec<_>>(),
             [1, 3]
         );
-        assert!(top_by_memory(&processes, 0).is_empty());
-        assert!(top_by_memory(&[], 10).is_empty());
+        assert!(top_by_sort(&processes, ProcessSort::Memory, 0).is_empty());
+        assert!(top_by_sort(&[], ProcessSort::Memory, 10).is_empty());
+    }
+
+    #[test]
+    fn top_by_cpu_sorts_descending_and_preserves_values_above_100() {
+        let processes = [
+            process(4, "four", 10, 55.0),
+            process(3, "three", 20, 125.0),
+            process(1, "one", 20, 80.0),
+        ];
+
+        assert_eq!(
+            top_by_sort(&processes, ProcessSort::Cpu, 2)
+                .iter()
+                .map(|process| process.pid)
+                .collect::<Vec<_>>(),
+            [3, 1]
+        );
+        assert_eq!(
+            format_cpu_percent(top_by_sort(&processes, ProcessSort::Cpu, 1)[0].cpu_usage_percent),
+            "125.0%"
+        );
+    }
+
+    #[test]
+    fn top_by_cpu_ranks_nonfinite_values_last_and_breaks_identity_ties() {
+        let mut same_pid_later = process(7, "later", 0, f32::NAN);
+        same_pid_later.start_time_secs = 20;
+        let mut same_pid_earlier = process(7, "earlier", 0, f32::INFINITY);
+        same_pid_earlier.start_time_secs = 10;
+        let processes = [
+            same_pid_later,
+            process(8, "finite", 0, 1.0),
+            same_pid_earlier,
+        ];
+
+        assert_eq!(
+            top_by_sort(&processes, ProcessSort::Cpu, 3)
+                .iter()
+                .map(|process| process.name.as_str())
+                .collect::<Vec<_>>(),
+            ["finite", "earlier", "later"]
+        );
+        let table = render_table(&processes, ProcessSort::Cpu, 3);
+        assert!(table.lines().skip(2).all(|line| line.ends_with("n/a")));
     }
 
     #[test]
     fn render_table_handles_empty_and_sorts_rows() {
-        assert_eq!(render_table(&[], 10), "(no processes observed)");
+        assert_eq!(
+            render_table(&[], ProcessSort::Memory, 10),
+            "(no processes observed)"
+        );
         let table = render_table(
             &[process(2, "two", 1024, 1.5), process(1, "one", 2048, 0.0)],
+            ProcessSort::Memory,
             10,
         );
         assert_eq!(
@@ -124,6 +208,14 @@ mod tests {
                 "2       two                         1.0 KiB     1.5%"
             )
         );
+    }
+
+    #[test]
+    fn format_process_age_reports_cached_data_age() {
+        assert_eq!(format_process_age(5000, None), "process data: unavailable");
+        assert_eq!(format_process_age(0, Some(0)), "process data: 0.0 s old");
+        assert_eq!(format_process_age(4250, Some(0)), "process data: 4.2 s old");
+        assert_eq!(format_process_age(0, Some(1)), "process data: 0.0 s old");
     }
 
     #[test]

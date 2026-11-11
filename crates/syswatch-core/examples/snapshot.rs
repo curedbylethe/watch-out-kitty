@@ -22,7 +22,10 @@ fn main() -> Result<(), sysinfo::Error> {
     );
     println!("Processes: {}", snapshot.processes.len());
     println!();
-    println!("{}", report::render_table(&snapshot.processes, TOP_N));
+    println!(
+        "{}",
+        report::render_table(&snapshot.processes, report::ProcessSort::Memory, TOP_N)
+    );
 
     Ok(())
 }
