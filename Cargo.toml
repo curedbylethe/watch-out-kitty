@@ -1,3 +1,3 @@
 [workspace]
-members = ["crates/syswatch-core"]
+members = ["crates/syswatch-core", "crates/syswatch-daemon"]
 resolver = "3"
