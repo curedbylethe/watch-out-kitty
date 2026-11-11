@@ -13,10 +13,15 @@ git clone https://github.com/curedbylethe/watch-out-kitty.git
 cd watch-out-kitty
 cargo run -p syswatch-core --example snapshot
 cargo run -p syswatch-daemon
+cargo run -p syswatch-cli -- status
 ```
 
 The example prints one snapshot of aggregate CPU, physical memory, and the
 processes using the most memory, then exits. The daemon runs in the foreground.
+While it runs, `syswatch status` prints the latest CPU, memory, process count,
+and sample ages. It exits with status 1 when the daemon is unavailable or its
+connection times out, protocol version differs, or response is invalid. It
+exits with status 2 for invalid command-line arguments.
 Ctrl-C (SIGINT) or SIGTERM stops it cleanly, prints `syswatch-daemon: stopped`,
 and exits with status 0. CI currently runs on Ubuntu 24.04.
 
@@ -31,9 +36,9 @@ request line per connection; the server closes the connection after its reply.
 
 ## Current scope
 
-This repository contains the telemetry crate, snapshot example, and foreground
-daemon; it does not yet display an indicator in Kitty. A background service,
-command-line interface, and advisory process recommendations are planned. See the
+This repository contains the telemetry crate, snapshot example, foreground
+daemon, and `syswatch status` command; it does not yet display an indicator in
+Kitty. A background service and advisory process recommendations are planned. See the
 [issue tracker](https://github.com/curedbylethe/watch-out-kitty/issues) for
 planned work and [issue #13](https://github.com/curedbylethe/watch-out-kitty/issues/13)
 for contributor guidance.
@@ -61,6 +66,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-core/src/protocol.rs` | Versioned read-only monitoring protocol |
 | `crates/syswatch-core/examples/snapshot.rs` | One-time snapshot example |
 | `crates/syswatch-daemon` | Foreground monitoring daemon |
+| `crates/syswatch-cli` | Status command-line client |
 | `crates/syswatch-daemon/src/clock.rs` | Interruptible monotonic clock |
 | `crates/syswatch-daemon/src/scheduler.rs` | Independent sampling schedule |
 | `crates/syswatch-daemon/src/latest.rs` | Cached latest snapshot |
@@ -123,6 +129,9 @@ The two read-only requests and example replies:
 The protocol has no filesystem paths, process-control operations, authentication,
 remote access, history, or write requests. Types live in
 `syswatch_core::protocol`.
+
+`syswatch status` shows `warming up` before the first CPU sample and `not yet
+sampled` before the first process scan. Displayed ages use the sample times.
 
 ## License
 

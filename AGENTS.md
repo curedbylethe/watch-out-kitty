@@ -2,9 +2,10 @@
 
 ## Workspace and crate scope
 
-The Rust 2024 workspace contains `crates/syswatch-core`. The crate exposes
-system collection, snapshot data types, and text reporting through
-`src/collector.rs`, `src/snapshot.rs`, and `src/report.rs`. Its
+The Rust 2024 workspace contains `crates/syswatch-core` for telemetry,
+`crates/syswatch-daemon` for foreground sampling, and `crates/syswatch-cli` for status
+output. The core exposes system collection, snapshot data types, and text
+reporting through `src/collector.rs`, `src/snapshot.rs`, and `src/report.rs`. Its
 `examples/snapshot.rs` prints one diagnostic snapshot. See `README.md` for
 setup and the example.
 
