@@ -156,4 +156,24 @@ mod tests {
         assert_eq!(deserialized.parent_pid, None);
         assert_eq!(deserialized, process);
     }
+
+    #[test]
+    fn identity_combines_pid_and_start_time() {
+        let process = ProcessSnapshot {
+            pid: 42,
+            parent_pid: None,
+            name: "worker".into(),
+            cpu_usage_percent: 0.0,
+            memory_bytes: 0,
+            start_time_secs: 1_700_000_000,
+        };
+        let reused_pid = ProcessSnapshot {
+            start_time_secs: 1_700_000_001,
+            ..process.clone()
+        };
+
+        assert_eq!(process.identity(), (42, 1_700_000_000));
+        assert_ne!(process.identity(), reused_pid.identity());
+        assert_eq!(process.identity(), process.clone().identity());
+    }
 }
