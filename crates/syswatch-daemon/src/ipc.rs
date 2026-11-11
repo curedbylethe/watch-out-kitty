@@ -212,7 +212,8 @@ fn handle_client<F>(mut stream: UnixStream, latest: &F)
 where
     F: Fn() -> Option<SystemSnapshot>,
 {
-    if stream.set_read_timeout(Some(READ_TIMEOUT)).is_err()
+    if stream.set_nonblocking(false).is_err()
+        || stream.set_read_timeout(Some(READ_TIMEOUT)).is_err()
         || stream.set_write_timeout(Some(WRITE_TIMEOUT)).is_err()
     {
         return;
@@ -333,6 +334,29 @@ mod tests {
         assert!(line.contains("\"kind\":\"status\""));
         assert!(line.contains("\"timestamp_ms\":123"));
         server.shutdown().unwrap();
+    }
+
+    #[test]
+    fn handles_delayed_request_on_nonblocking_accepted_stream() {
+        let dir = TempDir::new();
+        let listener = UnixListener::bind(dir.socket()).unwrap();
+        let handler = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            stream.set_nonblocking(true).unwrap();
+            handle_client(stream, &|| Some(snapshot()));
+        });
+        let mut stream = UnixStream::connect(dir.socket()).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        thread::sleep(Duration::from_millis(100));
+        stream
+            .write_all(b"{\"version\":1,\"command\":\"status\"}\n")
+            .unwrap();
+        let mut response = String::new();
+        assert!(BufReader::new(stream).read_line(&mut response).unwrap() > 0);
+        assert!(response.contains("\"kind\":\"status\""));
+        handler.join().unwrap();
     }
 
     #[test]
