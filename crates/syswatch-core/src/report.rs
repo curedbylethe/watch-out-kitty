@@ -20,6 +20,7 @@ pub fn format_bytes(bytes: u64) -> String {
 }
 
 /// Formats per-process CPU usage as a percentage, or `n/a` when unavailable.
+/// Per-process CPU can exceed 100% because one fully used core counts as 100%.
 pub fn format_cpu_percent(value: f32) -> String {
     if value.is_finite() {
         format!("{value:.1}%")
