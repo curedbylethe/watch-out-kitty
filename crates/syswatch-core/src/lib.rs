@@ -1,5 +1,8 @@
 //! Core types and logic for syswatch.
 
+pub mod snapshot;
+pub use snapshot::{MemorySnapshot, ProcessSnapshot, SystemSnapshot};
+
 #[cfg(test)]
 mod tests {
     #[test]
