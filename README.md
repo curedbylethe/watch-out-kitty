@@ -1,69 +1,63 @@
-# watch-out-kitty
+# Watch Out Kitty
 
-Watch Out Kitty is a macOS-first system monitor for showing CPU and RAM use in
-Kitty. It currently provides a Rust telemetry core; advisory process inspection
-is planned.
+Watch Out Kitty is a macOS-first telemetry library for a CPU and RAM indicator
+in Kitty. Run the included example to print a snapshot of CPU, memory, and
+process usage.
 
-## Status
+## Run it
 
-### Implemented
+Install the Rust stable toolchain, then clone and run the example:
 
-- Samples aggregate CPU, physical memory, and process metadata.
-- Exposes serializable snapshots and helpers for readable CPU, memory, and
-  process reports.
-- Includes a diagnostic snapshot example and CI checks for formatting, Clippy,
-  and tests.
-- Uses the Apache-2.0 license; see [LICENSE](LICENSE).
+```sh
+git clone https://github.com/curedbylethe/watch-out-kitty.git
+cd watch-out-kitty
+cargo run -p syswatch-core --example snapshot
+```
 
-### Planned
+The example prints one snapshot of aggregate CPU, physical memory, and the
+processes using the most memory, then exits. CI currently runs on Ubuntu 24.04.
 
-- Background daemon and command-line interface.
-- Kitty UI and rendering.
-- Safe, advisory process recommendations.
-- Contributor guidance in [issue #13](https://github.com/curedbylethe/watch-out-kitty/issues/13).
+## Current scope
 
-See the [issue tracker](https://github.com/curedbylethe/watch-out-kitty/issues)
-for planned work. CI currently runs on Ubuntu 24.04; macOS is the primary target.
+This repository contains the telemetry crate and snapshot example; it does not
+yet display an indicator in Kitty. A background service, command-line
+interface, and advisory process recommendations are planned. See the
+[issue tracker](https://github.com/curedbylethe/watch-out-kitty/issues) for
+planned work and [issue #13](https://github.com/curedbylethe/watch-out-kitty/issues/13)
+for contributor guidance.
 
-## Prerequisites
+## Development
 
-- Rust stable toolchain (edition 2024).
-- macOS is the primary target; CI runs on Ubuntu 24.04.
-
-## Build and check
-
-Run from the repository root:
+The workspace uses Rust edition 2024. From the repository root:
 
 ```sh
 cargo build --workspace
 cargo test --workspace
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo run -p syswatch-core --example snapshot
 ```
 
-The snapshot example prints current CPU, memory, and top processes. It is a
-diagnostic tool, not a permanent CLI.
+## Project files
 
-## Repository layout
-
-| Path | Purpose |
+| Path | Contents |
 | --- | --- |
-| `crates/syswatch-core` | Telemetry library crate |
-| `crates/syswatch-core/src/snapshot.rs` | Serializable system, memory, and process snapshots |
-| `crates/syswatch-core/src/collector.rs` | Collects system telemetry |
-| `crates/syswatch-core/src/report.rs` | Formats CPU, memory, and process reports |
-| `crates/syswatch-core/examples/snapshot.rs` | Diagnostic snapshot example |
-| `.github/workflows/ci.yml` | Ubuntu formatting, lint, and test checks |
-| `LICENSE` | Apache-2.0 license text |
+| `crates/syswatch-core` | Telemetry library |
+| `crates/syswatch-core/src/collector.rs` | System sampling |
+| `crates/syswatch-core/src/snapshot.rs` | CPU, memory, and process data types |
+| `crates/syswatch-core/src/report.rs` | Human-readable formatting |
+| `crates/syswatch-core/examples/snapshot.rs` | One-time snapshot example |
+| `.github/workflows/ci.yml` | Ubuntu build checks |
+| `LICENSE` | Apache-2.0 license |
 
-## Telemetry notes
+## Reading the measurements
 
-Global CPU usage is an aggregate from 0% to 100%. Per-process CPU can exceed
-100% because one fully used core counts as 100%. The first CPU sample is not
-representative. Used RAM reports occupied physical memory, not macOS memory
-pressure. Values are single samples, not averages. Process names may contain
-replacement characters and are truncated to 24 characters. Expect differences
-from Activity Monitor; do not chase exact equality.
+Per-process CPU can exceed 100% when a process uses multiple cores. The first
+CPU sample is not representative. Memory reports occupied physical RAM, not
+macOS memory pressure. All values are point-in-time samples. Process names may
+contain replacement characters and are shortened to 24 characters.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
 
 Copyright 2026 Parsa
