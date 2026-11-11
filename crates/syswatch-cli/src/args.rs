@@ -14,6 +14,9 @@ pub fn parse(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
     let command = command.to_string_lossy();
     match command.as_ref() {
         "help" | "-h" | "--help" if args.next().is_none() => Ok(Command::Help),
+        "help" | "-h" | "--help" => Err(format!(
+            "syswatch: {command} accepts no arguments\n\n{USAGE}"
+        )),
         "status" if args.next().is_none() => Ok(Command::Status),
         "status" => Err(format!(
             "{}\n\nsyswatch: status accepts no arguments",
@@ -62,6 +65,15 @@ mod tests {
             parse(args(&["status", "extra"]))
                 .unwrap_err()
                 .contains("status accepts no arguments")
+        );
+    }
+
+    #[test]
+    fn help_rejects_extra_arguments_as_help_usage() {
+        assert!(
+            parse(args(&["help", "extra"]))
+                .unwrap_err()
+                .contains("help accepts no arguments")
         );
     }
 }

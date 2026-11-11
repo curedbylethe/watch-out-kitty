@@ -42,7 +42,7 @@ pub fn request_status(path: &Path, timeout: Duration) -> Result<Response, Client
         let message = if error.kind() == io::ErrorKind::NotFound {
             format!("cannot connect to daemon at {}: no such file or directory; syswatch-daemon running?", path.display())
         } else {
-            format!("cannot connect daemon at {}: {error}", path.display())
+            format!("cannot connect to daemon at {}: {error}", path.display())
         };
         ClientError::Connect(message)
     })?;
@@ -237,6 +237,13 @@ mod tests {
             std::env::temp_dir().join(format!("syswatch-cli-missing-{}.sock", std::process::id()));
         let error = request_status(&path, TIMEOUT).unwrap_err();
         assert!(error.to_string().contains("syswatch-daemon running?"));
+    }
+
+    #[test]
+    fn other_connect_errors_name_the_daemon_path() {
+        let path = std::path::PathBuf::from(format!("/{}", "x".repeat(200)));
+        let error = request_status(&path, TIMEOUT).unwrap_err().to_string();
+        assert!(error.starts_with(&format!("cannot connect to daemon at {}:", path.display())));
     }
 
     #[test]
