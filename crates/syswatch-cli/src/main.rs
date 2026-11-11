@@ -12,7 +12,7 @@ fn main() {
     let command = match args::parse(std::env::args_os().skip(1)) {
         Ok(command) => command,
         Err(message) => {
-            eprintln!("syswatch: {message}");
+            eprintln!("{message}");
             std::process::exit(2);
         }
     };
