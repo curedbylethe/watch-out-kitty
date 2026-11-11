@@ -93,8 +93,94 @@ mod tests {
         assert!(history.is_empty());
         assert_eq!(history.iter().count(), 0);
     }
+
+    #[test]
+    fn absent_process_is_marked_at_next_scan() {
+        let mut history = ProcessHistory::new();
+        history.record_scan(
+            100,
+            &[
+                process(7, 10, "worker", 1.0, 20),
+                process(8, 10, "other", 1.0, 30),
+            ],
+        );
+        history.record_scan(200, &[process(8, 10, "other", 1.0, 30)]);
+
+        assert_eq!(history.get((7, 10)).unwrap().disappeared_at_ms, Some(200));
+        assert_eq!(history.get((8, 10)).unwrap().disappeared_at_ms, None);
+    }
+
+    #[test]
+    fn no_scan_does_not_mark_disappearance() {
+        let mut history = ProcessHistory::new();
+        history.record_scan(100, &[process(7, 10, "worker", 1.0, 20)]);
+
+        assert_eq!(history.last_scan_ms(), Some(100));
+        assert_eq!(history.get((7, 10)).unwrap().disappeared_at_ms, None);
+    }
+
+    #[test]
+    fn returning_process_clears_disappearance() {
+        let mut history = ProcessHistory::new();
+        history.record_scan(100, &[process(7, 10, "worker", 1.0, 20)]);
+        history.record_scan(200, &[]);
+        history.record_scan(300, &[process(7, 10, "worker", 2.0, 40)]);
+
+        let record = history.get((7, 10)).unwrap();
+        assert_eq!(record.disappeared_at_ms, None);
+        assert_eq!(record.last_seen_ms, 300);
+        assert_eq!(record.observations().len(), 2);
+    }
+
+    #[test]
+    fn empty_scan_marks_prior_processes_disappeared() {
+        let mut history = ProcessHistory::new();
+        history.record_scan(
+            100,
+            &[
+                process(7, 10, "worker", 1.0, 20),
+                process(8, 10, "other", 1.0, 30),
+            ],
+        );
+        history.record_scan(200, &[]);
+
+        assert_eq!(history.get((7, 10)).unwrap().disappeared_at_ms, Some(200));
+        assert_eq!(history.get((8, 10)).unwrap().disappeared_at_ms, Some(200));
+    }
+
+    #[test]
+    fn first_empty_scan_marks_nothing() {
+        let mut history = ProcessHistory::new();
+        history.record_scan(100, &[]);
+
+        assert!(history.is_empty());
+        assert_eq!(history.last_scan_ms(), Some(100));
+    }
+
+    #[test]
+    fn disappearance_timestamp_never_precedes_last_seen() {
+        let mut history = ProcessHistory::new();
+        history.record_scan(1_000, &[process(7, 10, "worker", 1.0, 20)]);
+        history.record_scan(500, &[]);
+
+        let record = history.get((7, 10)).unwrap();
+        assert_eq!(record.disappeared_at_ms, Some(1_000));
+        assert!(record.disappeared_at_ms.unwrap() >= record.last_seen_ms);
+        assert_eq!(history.last_scan_ms(), Some(1_000));
+    }
+
+    #[test]
+    fn returning_process_identity_is_unchanged() {
+        let mut history = ProcessHistory::new();
+        history.record_scan(100, &[process(7, 10, "old", 1.0, 20)]);
+        history.record_scan(200, &[process(7, 11, "new", 1.0, 30)]);
+
+        assert_eq!(history.len(), 2);
+        assert_eq!(history.get((7, 10)).unwrap().disappeared_at_ms, Some(200));
+        assert_eq!(history.get((7, 11)).unwrap().disappeared_at_ms, None);
+    }
 }
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::snapshot::ProcessSnapshot;
 
@@ -124,6 +210,8 @@ pub struct ProcessRecord {
     pub first_seen_ms: u64,
     /// Latest scan timestamp for this identity.
     pub last_seen_ms: u64,
+    /// Latest scan timestamp that omitted this identity.
+    pub disappeared_at_ms: Option<u64>,
     observations: VecDeque<ProcessObservation>,
 }
 
@@ -148,6 +236,7 @@ impl ProcessRecord {
 #[derive(Debug, Clone)]
 pub struct ProcessHistory {
     records: BTreeMap<(u32, u64), ProcessRecord>,
+    last_scan_ms: Option<u64>,
 }
 
 impl ProcessHistory {
@@ -155,11 +244,21 @@ impl ProcessHistory {
     pub fn new() -> Self {
         Self {
             records: BTreeMap::new(),
+            last_scan_ms: None,
         }
     }
 
     /// Records every process in one completed process scan.
     pub fn record_scan(&mut self, timestamp_ms: u64, processes: &[ProcessSnapshot]) {
+        let identities: BTreeSet<_> = processes.iter().map(ProcessSnapshot::identity).collect();
+        if self.last_scan_ms.is_some() {
+            for (identity, record) in &mut self.records {
+                if !identities.contains(identity) && record.disappeared_at_ms.is_none() {
+                    record.disappeared_at_ms = Some(timestamp_ms.max(record.last_seen_ms));
+                }
+            }
+        }
+
         for process in processes {
             let identity = process.identity();
             match self.records.entry(identity) {
@@ -177,6 +276,7 @@ impl ProcessHistory {
                         parent_pid: process.parent_pid,
                         first_seen_ms: timestamp_ms,
                         last_seen_ms: timestamp_ms,
+                        disappeared_at_ms: None,
                         observations,
                     });
                 }
@@ -186,6 +286,7 @@ impl ProcessHistory {
                     record.last_seen_ms = record.last_seen_ms.max(timestamp_ms);
                     record.name.clone_from(&process.name);
                     record.parent_pid = process.parent_pid;
+                    record.disappeared_at_ms = None;
                     record.observations.push_back(ProcessObservation {
                         timestamp_ms,
                         cpu_usage_percent: process
@@ -197,6 +298,11 @@ impl ProcessHistory {
                 }
             }
         }
+
+        self.last_scan_ms = Some(
+            self.last_scan_ms
+                .map_or(timestamp_ms, |last| last.max(timestamp_ms)),
+        );
     }
 
     /// Returns a record by process identity.
@@ -217,6 +323,11 @@ impl ProcessHistory {
     /// Returns whether the history has no records.
     pub fn is_empty(&self) -> bool {
         self.records.is_empty()
+    }
+
+    /// Returns the greatest timestamp of any ingested process scan.
+    pub fn last_scan_ms(&self) -> Option<u64> {
+        self.last_scan_ms
     }
 }
 
