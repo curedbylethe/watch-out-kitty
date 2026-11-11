@@ -269,6 +269,7 @@ mod tests {
                 .iter()
                 .any(|process| process.pid == std::process::id())
         );
+        assert_eq!(collector.process_refresh_calls(), 1);
         assert!(
             collector
                 .refresh()
@@ -276,18 +277,7 @@ mod tests {
                 .iter()
                 .any(|process| process.pid == std::process::id())
         );
-    }
-
-    #[test]
-    fn collector_refresh_tracks_cpu_sample_time_after_warm_up() {
-        let mut collector = Collector::new().unwrap();
-        assert_eq!(collector.refresh().cpu_updated_at_ms, None);
-
-        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL + Duration::from_millis(1));
-        let snapshot = collector.refresh();
-
-        assert!(snapshot.cpu_updated_at_ms.is_some());
-        assert_eq!(snapshot.cpu_updated_at_ms, Some(snapshot.timestamp_ms));
+        assert_eq!(collector.process_refresh_calls(), 2);
     }
 
     #[test]
@@ -337,6 +327,7 @@ mod tests {
         std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL + Duration::from_millis(1));
         let sample = collector.refresh_aggregate();
         assert!(sample.cpu_updated_at_ms.is_some());
+        assert_eq!(sample.cpu_updated_at_ms, Some(sample.timestamp_ms));
         assert!(sample.cpu_usage_percent.is_finite());
     }
 
@@ -352,22 +343,6 @@ mod tests {
         assert!(updated_at.is_some());
         collector.refresh_aggregate();
         assert_eq!(collector.processes_updated_at_ms(), updated_at);
-    }
-
-    #[test]
-    fn full_refresh_enumerates_once() {
-        let mut collector = Collector::new().unwrap();
-        let snapshot = collector.refresh();
-
-        assert_eq!(collector.process_refresh_calls(), 1);
-        assert!(
-            snapshot
-                .processes
-                .iter()
-                .any(|p| p.pid == std::process::id())
-        );
-        assert_eq!(snapshot.cpu_updated_at_ms, None);
-        assert!(snapshot.processes_updated_at_ms.is_some());
     }
 
     #[test]
