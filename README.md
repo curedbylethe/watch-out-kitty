@@ -14,6 +14,7 @@ cd watch-out-kitty
 cargo run -p syswatch-core --example snapshot
 cargo run -p syswatch-daemon
 cargo run -p syswatch-cli -- status
+cargo run -p syswatch-cli -- top
 ```
 
 The example prints one snapshot of aggregate CPU, physical memory, and the
@@ -21,7 +22,10 @@ processes using the most memory, then exits. The daemon runs in the foreground.
 While it runs, `syswatch status` prints the latest CPU, memory, process count,
 and sample ages. It exits with status 1 when the daemon is unavailable or its
 connection times out, protocol version differs, or response is invalid. It
-exits with status 2 for invalid command-line arguments.
+exits with status 2 for invalid command-line arguments. `syswatch top` prints
+cached process data ranked by memory (default) or CPU. Use `--sort memory|cpu`
+to choose order and `--limit N` to set a positive row limit (default 10).
+`status` and `top` use exit code 1 for runtime errors and 2 for usage errors.
 Ctrl-C (SIGINT) or SIGTERM stops it cleanly, prints `syswatch-daemon: stopped`,
 and exits with status 0. CI currently runs on Ubuntu 24.04.
 
@@ -37,8 +41,9 @@ request line per connection; the server closes the connection after its reply.
 ## Current scope
 
 This repository contains the telemetry crate, snapshot example, foreground
-daemon, and `syswatch status` command; it does not yet display an indicator in
-Kitty. A background service and advisory process recommendations are planned. See the
+daemon, and `syswatch status` and `syswatch top` commands; it does not yet
+display an indicator in Kitty. A background service and advisory process
+recommendations are planned. See the
 [issue tracker](https://github.com/curedbylethe/watch-out-kitty/issues) for
 planned work and [issue #13](https://github.com/curedbylethe/watch-out-kitty/issues/13)
 for contributor guidance.
@@ -61,17 +66,27 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-core` | Telemetry library |
 | `crates/syswatch-core/src/collector.rs` | System sampling |
 | `crates/syswatch-core/src/config.rs` | Validated monitoring intervals |
+| `crates/syswatch-core/src/history.rs` | Bounded process observation history |
+| `crates/syswatch-core/src/ipc.rs` | Daemon socket path resolution |
+| `crates/syswatch-core/src/lib.rs` | Public core modules and exports |
 | `crates/syswatch-core/src/snapshot.rs` | CPU, memory, and process data types |
 | `crates/syswatch-core/src/report.rs` | Human-readable formatting |
 | `crates/syswatch-core/src/protocol.rs` | Versioned read-only monitoring protocol |
 | `crates/syswatch-core/examples/snapshot.rs` | One-time snapshot example |
 | `crates/syswatch-daemon` | Foreground monitoring daemon |
 | `crates/syswatch-daemon/src/clock.rs` | Interruptible monotonic clock |
+| `crates/syswatch-daemon/src/ipc.rs` | Unix socket server |
 | `crates/syswatch-daemon/src/scheduler.rs` | Independent sampling schedule |
 | `crates/syswatch-daemon/src/latest.rs` | Cached latest snapshot |
+| `crates/syswatch-daemon/src/lib.rs` | Daemon lifecycle and server startup |
+| `crates/syswatch-daemon/src/main.rs` | Foreground daemon entry point |
 | `crates/syswatch-daemon/src/sampler.rs` | Collector and process-history owner |
 | `crates/syswatch-daemon/src/signals.rs` | SIGINT and SIGTERM handling |
-| `crates/syswatch-cli` | Status command-line client |
+| `crates/syswatch-cli` | Status and process-ranking command-line client |
+| `crates/syswatch-cli/src/args.rs` | Command-line argument parsing |
+| `crates/syswatch-cli/src/client.rs` | Daemon IPC client |
+| `crates/syswatch-cli/src/main.rs` | Command dispatch and process entry point |
+| `crates/syswatch-cli/src/output.rs` | Status and process report rendering |
 | `.github/workflows/ci.yml` | Ubuntu build checks |
 | `LICENSE` | Apache-2.0 license |
 
@@ -84,10 +99,15 @@ contain replacement characters and are shortened to 24 characters. The daemon
 keeps its last successful sample in memory between refreshes. The daemon exposes
 cached samples through the per-user socket described above. Process data can be
 older than aggregate data; the `*_updated_at_ms` fields show sample times.
+`syswatch top` reads the cached process list and does not scan on demand. The
+age line under the table (for example, `process data: 4.2 s old`) shows its age;
+before the first scan it prints `process data: unavailable`. Per-process CPU
+can exceed 100%; nonfinite CPU values render as `n/a`. Rows sort by the selected
+key, then by PID and start time.
 
 ## Protocol
 
-The socket server and planned command-line client exchange one UTF-8 JSON
+The socket server and command-line client exchange one UTF-8 JSON
 value per line. Each request and reply uses one line with no embedded newline.
 Clients send one request per line and read each reply through its line ending.
 Requests over 4096 bytes are rejected. A transport reader must cap buffered
