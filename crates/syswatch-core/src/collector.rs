@@ -76,3 +76,60 @@ fn snapshot_at(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::{Collector, cpu_refresh_due, snapshot_at};
+    use crate::snapshot::MemorySnapshot;
+
+    #[test]
+    fn cpu_refresh_is_due_without_a_previous_sample() {
+        assert!(cpu_refresh_due(None, Instant::now()));
+    }
+
+    #[test]
+    fn cpu_refresh_waits_for_minimum_interval() {
+        let last = Instant::now();
+        let interval = sysinfo::MINIMUM_CPU_UPDATE_INTERVAL;
+
+        assert!(!cpu_refresh_due(Some(last), last));
+        assert!(!cpu_refresh_due(
+            Some(last),
+            last + interval - Duration::from_nanos(1)
+        ));
+        assert!(cpu_refresh_due(Some(last), last + interval));
+    }
+
+    #[test]
+    fn cpu_refresh_rejects_time_before_previous_sample() {
+        let last = Instant::now();
+
+        assert!(!cpu_refresh_due(
+            Some(last),
+            last - sysinfo::MINIMUM_CPU_UPDATE_INTERVAL
+        ));
+    }
+
+    #[test]
+    fn snapshot_mapping_copies_values_and_has_no_processes() {
+        let memory = MemorySnapshot {
+            total_bytes: 16_000,
+            used_bytes: 8_000,
+        };
+        let snapshot = snapshot_at(123, 42.5, memory.clone());
+
+        assert_eq!(snapshot.timestamp_ms, 123);
+        assert_eq!(snapshot.cpu_usage_percent, 42.5);
+        assert_eq!(snapshot.memory, memory);
+        assert!(snapshot.processes.is_empty());
+    }
+
+    #[test]
+    fn collector_refresh_returns_snapshot_without_processes() {
+        let mut collector = Collector::new().unwrap();
+
+        assert!(collector.refresh().processes.is_empty());
+        assert!(collector.refresh().processes.is_empty());
+    }
+}
