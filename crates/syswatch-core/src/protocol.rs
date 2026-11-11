@@ -147,6 +147,9 @@ pub fn encode_line<T: Serialize>(value: &T) -> Result<String, serde_json::Error>
 }
 
 /// Parse and validate one request frame.
+///
+/// Transport readers must cap buffered input at `MAX_REQUEST_BYTES + 1` bytes
+/// and return `malformed_request` if no LF appears within that bound.
 pub fn decode_request(line: &str) -> Result<Request, ProtocolError> {
     if line.is_empty() || line.len() > MAX_REQUEST_BYTES || line.contains(['\n', '\r']) {
         return Err(malformed_request());
