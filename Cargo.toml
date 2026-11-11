@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/syswatch-core"]
+resolver = "3"
