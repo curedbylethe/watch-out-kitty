@@ -2,7 +2,7 @@ use std::{
     io::{self, Read, Write},
     os::unix::net::UnixStream,
     path::Path,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use syswatch_core::protocol::{self, Request, RequestCommand, Response};
 
@@ -63,16 +63,38 @@ pub fn request_status(path: &Path, timeout: Duration) -> Result<Response, Client
         .write_all(request.as_bytes())
         .map_err(|error| io_error(error, "send", path, timeout))?;
 
+    let deadline = Instant::now() + timeout;
+    let read_interval = timeout.min(Duration::from_millis(10));
+    if read_interval.is_zero() {
+        return Err(timeout_error(timeout, path));
+    }
+    stream
+        .set_read_timeout(Some(read_interval))
+        .map_err(|error| ClientError::Read(format!("cannot set daemon read timeout: {error}")))?;
     let mut bytes = Vec::new();
-    let mut byte = [0];
+    let mut chunk = [0; 8192];
     while bytes.len() <= MAX_RESPONSE_BYTES {
-        match stream.read(&mut byte) {
+        if deadline.saturating_duration_since(Instant::now()).is_zero() {
+            return Err(timeout_error(timeout, path));
+        }
+        match stream.read(&mut chunk) {
             Ok(0) => break,
-            Ok(_) if byte[0] == b'\n' => {
-                bytes.push(byte[0]);
-                break;
+            Ok(count) => {
+                let chunk = &chunk[..count];
+                if let Some(end) = chunk.iter().position(|byte| *byte == b'\n') {
+                    bytes.extend_from_slice(&chunk[..=end]);
+                    break;
+                }
+                bytes.extend_from_slice(chunk);
             }
-            Ok(_) => bytes.push(byte[0]),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue;
+            }
             Err(error) => return Err(io_error(error, "read", path, timeout)),
         }
     }
@@ -111,11 +133,7 @@ fn io_error(error: io::Error, action: &str, path: &Path, timeout: Duration) -> C
         error.kind(),
         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
     ) {
-        ClientError::Timeout(format!(
-            "timed out after {} ms waiting for daemon at {}",
-            timeout.as_millis(),
-            path.display()
-        ))
+        timeout_error(timeout, path)
     } else {
         let message = match action {
             "send" => format!(
@@ -133,6 +151,14 @@ fn io_error(error: io::Error, action: &str, path: &Path, timeout: Duration) -> C
             ClientError::Read(message)
         }
     }
+}
+
+fn timeout_error(timeout: Duration, path: &Path) -> ClientError {
+    ClientError::Timeout(format!(
+        "timed out after {} ms waiting for daemon at {}",
+        timeout.as_millis(),
+        path.display()
+    ))
 }
 
 #[cfg(test)]
@@ -203,6 +229,35 @@ mod tests {
         let error = request_status(&socket.0, Duration::from_millis(30)).unwrap_err();
         assert!(matches!(&error, ClientError::Timeout(_)));
         assert!(error.to_string().contains(&socket.0.display().to_string()));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn timeout_applies_to_the_whole_response() {
+        let (socket, listener) = Socket::new();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = String::new();
+            io::BufReader::new(&mut stream)
+                .read_line(&mut request)
+                .unwrap();
+            let response =
+                protocol::encode_line(&Response::error(syswatch_core::protocol::ProtocolError {
+                    code: syswatch_core::protocol::ErrorCode::Unavailable,
+                    message: "later".to_owned(),
+                }))
+                .unwrap()
+                    + "\n";
+            for byte in response.bytes() {
+                if stream.write_all(&[byte]).is_err() {
+                    break;
+                }
+                let _ = stream.flush();
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+        let error = request_status(&socket.0, Duration::from_millis(60)).unwrap_err();
+        assert!(matches!(error, ClientError::Timeout(_)));
         server.join().unwrap();
     }
 
