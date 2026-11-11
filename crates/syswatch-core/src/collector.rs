@@ -34,7 +34,12 @@ impl Collector {
         })
     }
 
-    /// Refreshes memory and CPU without enumerating processes.
+    /// Refreshes memory every call and CPU after the minimum interval, without enumerating processes.
+    ///
+    /// The first call primes CPU counters and reports `0.0`; a later call at
+    /// least `sysinfo::MINIMUM_CPU_UPDATE_INTERVAL` later reports CPU usage.
+    /// Calls inside that interval reuse the prior CPU value. On macOS,
+    /// occupied RAM does not equal memory pressure.
     pub fn refresh_aggregate(&mut self) -> AggregateSnapshot {
         let observed_at_ms = timestamp_ms();
         let now = Instant::now();
@@ -107,19 +112,13 @@ impl Collector {
         self.last_processes_updated_ms
     }
 
-    /// Refreshes memory on every call and CPU only after the minimum interval.
+    /// Refreshes aggregate metrics and processes in one call.
     ///
-    /// The first call primes CPU counters and reports `0.0`; a later call at
-    /// least `sysinfo::MINIMUM_CPU_UPDATE_INTERVAL` later reports CPU usage.
-    /// Calls inside that interval reuse the prior CPU value. On macOS,
-    /// occupied RAM does not equal memory pressure. The first per-process CPU
-    /// sample may not be representative.
+    /// CPU warm-up and interval behavior match [`Self::refresh_aggregate`]. The
+    /// first per-process CPU sample may not be representative.
     pub fn refresh(&mut self) -> SystemSnapshot {
         let aggregate = self.refresh_aggregate();
-        let processes = {
-            self.refresh_processes();
-            self.cached_processes().to_vec()
-        };
+        let processes = self.refresh_processes().to_vec();
         snapshot_at(
             aggregate.timestamp_ms,
             aggregate.cpu_usage_percent,
