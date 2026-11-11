@@ -39,7 +39,7 @@ impl Collector {
             if self.last_cpu_refresh.is_some() {
                 self.last_cpu_usage_percent = self.system.global_cpu_usage();
             }
-            self.last_cpu_refresh = Some(now);
+            self.last_cpu_refresh = Some(Instant::now());
         }
 
         let memory = MemorySnapshot {
