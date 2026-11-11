@@ -1,0 +1,13 @@
+[package]
+name = "syswatch-cli"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+
+[[bin]]
+name = "syswatch"
+path = "src/main.rs"
+
+[dependencies]
+syswatch-core = { path = "../syswatch-core" }
+serde_json = "1"
