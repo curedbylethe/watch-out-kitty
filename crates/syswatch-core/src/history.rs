@@ -247,6 +247,29 @@ mod tests {
     }
 
     #[test]
+    fn process_count_evicts_absent_before_live() {
+        let mut history = ProcessHistory::with_limits(limits(2, 10, 10_000));
+        history.record_scan(
+            1_000,
+            &[
+                process(3, 1, "absent", 1.0, 30),
+                process(1, 1, "live", 1.0, 10),
+            ],
+        );
+        history.record_scan(
+            1_000,
+            &[
+                process(1, 1, "live", 1.0, 10),
+                process(2, 1, "new", 1.0, 20),
+            ],
+        );
+
+        assert!(history.get((3, 1)).is_none());
+        assert!(history.get((1, 1)).is_some());
+        assert!(history.get((2, 1)).is_some());
+    }
+
+    #[test]
     fn process_count_tie_breaks_on_identity() {
         let mut history = ProcessHistory::with_limits(limits(2, 10, 10_000));
         history.record_scan(
@@ -347,7 +370,7 @@ pub struct ProcessObservation {
 /// Retention limits for process history.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HistoryLimits {
-    /// Maximum number of process identities retained.
+    /// Maximum number of process identities retained; set above the live process count to retain all histories.
     pub max_processes: usize,
     /// Maximum observations retained for each process.
     pub max_observations_per_process: usize,
@@ -500,14 +523,23 @@ impl ProcessHistory {
         self.records.retain(|_, record| {
             timestamp_ms.saturating_sub(record.last_seen_ms) <= self.limits.max_age_ms
         });
-        while self.records.len() > self.limits.max_processes {
-            let oldest = self
+        let excess = self.records.len().saturating_sub(self.limits.max_processes);
+        if excess > 0 {
+            let mut eviction_order = self
                 .records
                 .iter()
-                .min_by_key(|(identity, record)| (record.last_seen_ms, **identity))
-                .map(|(identity, _)| *identity)
-                .unwrap();
-            self.records.remove(&oldest);
+                .map(|(identity, record)| {
+                    (
+                        record.disappeared_at_ms.is_none(),
+                        record.last_seen_ms,
+                        *identity,
+                    )
+                })
+                .collect::<Vec<_>>();
+            eviction_order.sort_unstable();
+            for (_, _, identity) in eviction_order.into_iter().take(excess) {
+                self.records.remove(&identity);
+            }
         }
     }
 
