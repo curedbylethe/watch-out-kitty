@@ -1,14 +1,18 @@
 /// System measurements captured at one point in time.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SystemSnapshot {
-    /// Sample time in milliseconds since the Unix epoch.
+    /// Aggregate and memory observation time in milliseconds since the Unix epoch.
     pub timestamp_ms: u64,
     /// Aggregate CPU usage across all cores, from 0 to 100 percent.
     pub cpu_usage_percent: f32,
+    /// Time when CPU usage was last sampled; `None` during warm-up.
+    pub cpu_updated_at_ms: Option<u64>,
     /// Physical memory measurements reported by the operating system.
     pub memory: MemorySnapshot,
-    /// Process observations; empty when collection was not performed. Order is unspecified.
+    /// Process observations from the last process refresh. Order is unspecified.
     pub processes: Vec<ProcessSnapshot>,
+    /// Time when process observations were last collected.
+    pub processes_updated_at_ms: Option<u64>,
 }
 
 /// Physical memory measurements reported by the operating system.
@@ -109,6 +113,7 @@ mod tests {
         let snapshot = SystemSnapshot {
             timestamp_ms: 1_700_000_000_123,
             cpu_usage_percent: 42.5,
+            cpu_updated_at_ms: Some(1_700_000_000_123),
             memory: MemorySnapshot {
                 total_bytes: 16_000,
                 used_bytes: 8_000,
@@ -131,6 +136,7 @@ mod tests {
                     start_time_secs: 1_700_000_000,
                 },
             ],
+            processes_updated_at_ms: None,
         };
 
         let serialized = serde_json::to_string(&snapshot).unwrap();
