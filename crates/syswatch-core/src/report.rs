@@ -104,7 +104,16 @@ fn truncate_name(name: &str) -> String {
     } else {
         name
     };
-    name.chars().take(24).collect()
+    name.chars()
+        .map(|character| {
+            if character.is_control() {
+                '\u{fffd}'
+            } else {
+                character
+            }
+        })
+        .take(24)
+        .collect()
 }
 
 #[cfg(test)]
@@ -246,5 +255,10 @@ mod tests {
             "abcdefghijklmnopqrstuvwx"
         );
         assert_eq!(truncate_name("猫".repeat(30).as_str()), "猫".repeat(24));
+    }
+
+    #[test]
+    fn truncate_name_replaces_terminal_control_characters() {
+        assert_eq!(truncate_name("a\u{1b}[2Jb\nc"), "a�[2Jb�c");
     }
 }
