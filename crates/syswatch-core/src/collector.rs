@@ -129,7 +129,9 @@ mod tests {
     fn collector_refresh_returns_snapshot_without_processes() {
         let mut collector = Collector::new().unwrap();
 
-        assert!(collector.refresh().processes.is_empty());
+        let first = collector.refresh();
+        assert_eq!(first.cpu_usage_percent, 0.0);
+        assert!(first.processes.is_empty());
         assert!(collector.refresh().processes.is_empty());
     }
 }
