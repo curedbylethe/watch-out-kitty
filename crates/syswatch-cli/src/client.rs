@@ -14,7 +14,7 @@ pub enum ClientError {
     Connect(String),
     Write(String),
     Read(String),
-    Timeout(u128),
+    Timeout(String),
     ProtocolMismatch { found: u32, expected: u32 },
     InvalidResponse(String),
     Encode(String),
@@ -28,7 +28,7 @@ impl std::fmt::Display for ClientError {
             | Self::Read(message)
             | Self::InvalidResponse(message)
             | Self::Encode(message) => f.write_str(message),
-            Self::Timeout(ms) => write!(f, "timed out after {ms} ms waiting for daemon"),
+            Self::Timeout(message) => f.write_str(message),
             Self::ProtocolMismatch { found, expected } => write!(
                 f,
                 "protocol mismatch: daemon speaks version {found}, client speaks version {expected}"
@@ -111,7 +111,11 @@ fn io_error(error: io::Error, action: &str, path: &Path, timeout: Duration) -> C
         error.kind(),
         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
     ) {
-        ClientError::Timeout(timeout.as_millis())
+        ClientError::Timeout(format!(
+            "timed out after {} ms waiting for daemon at {}",
+            timeout.as_millis(),
+            path.display()
+        ))
     } else {
         let message = match action {
             "send" => format!(
@@ -197,7 +201,8 @@ mod tests {
             thread::sleep(Duration::from_millis(150));
         });
         let error = request_status(&socket.0, Duration::from_millis(30)).unwrap_err();
-        assert!(matches!(error, ClientError::Timeout(30)));
+        assert!(matches!(&error, ClientError::Timeout(_)));
+        assert!(error.to_string().contains(&socket.0.display().to_string()));
         server.join().unwrap();
     }
 
