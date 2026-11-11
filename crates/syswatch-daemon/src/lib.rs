@@ -24,3 +24,6 @@ impl fmt::Display for DaemonError {
 }
 
 impl Error for DaemonError {}
+
+#[cfg(unix)]
+pub mod ipc;
