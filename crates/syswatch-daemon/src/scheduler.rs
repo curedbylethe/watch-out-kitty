@@ -1,6 +1,7 @@
 use std::{
     error::Error,
     fmt,
+    sync::{Arc, Mutex, PoisonError},
     time::{Duration, Instant},
 };
 
@@ -28,7 +29,7 @@ pub struct Scheduler<C, S> {
     config: MonitoringConfig,
     aggregate_deadline: Instant,
     process_deadline: Instant,
-    latest: LatestSnapshot,
+    latest: Arc<Mutex<LatestSnapshot>>,
 }
 
 impl<C: Clock, S: Sampler> Scheduler<C, S> {
@@ -40,24 +41,39 @@ impl<C: Clock, S: Sampler> Scheduler<C, S> {
             config,
             aggregate_deadline: now,
             process_deadline: now,
-            latest: LatestSnapshot::default(),
+            latest: Arc::new(Mutex::new(LatestSnapshot::default())),
         }
     }
 
     pub fn latest(&self) -> Option<syswatch_core::SystemSnapshot> {
-        self.latest.snapshot()
+        self.latest
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .snapshot()
+    }
+
+    pub fn latest_handle(&self) -> Arc<Mutex<LatestSnapshot>> {
+        Arc::clone(&self.latest)
     }
 
     pub fn run(&mut self) -> Result<(), SchedulerError> {
         loop {
             let now = self.clock.now();
             if now >= self.aggregate_deadline {
-                self.latest.set_aggregate(self.sampler.refresh_aggregate());
+                let aggregate = self.sampler.refresh_aggregate();
+                self.latest
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .set_aggregate(aggregate);
                 self.aggregate_deadline =
                     checked_deadline(self.clock.now(), self.config.aggregate_interval())?;
             }
             if self.clock.now() >= self.process_deadline {
-                self.latest.set_processes(self.sampler.refresh_processes());
+                let processes = self.sampler.refresh_processes();
+                self.latest
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .set_processes(processes);
                 self.process_deadline =
                     checked_deadline(self.clock.now(), self.config.process_interval())?;
             }

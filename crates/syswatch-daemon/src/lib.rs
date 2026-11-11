@@ -11,6 +11,8 @@ pub enum DaemonError {
     Collector(String),
     Scheduler(scheduler::SchedulerError),
     Signal(io::Error),
+    SocketPath(syswatch_core::ipc::SocketPathError),
+    Socket(io::Error),
 }
 
 impl fmt::Display for DaemonError {
@@ -19,6 +21,8 @@ impl fmt::Display for DaemonError {
             Self::Collector(error) => write!(f, "collector initialization failed: {error}"),
             Self::Scheduler(error) => write!(f, "scheduler failed: {error}"),
             Self::Signal(error) => write!(f, "signal-handler installation failed: {error}"),
+            Self::SocketPath(error) => write!(f, "socket path: {error}"),
+            Self::Socket(error) => write!(f, "socket server: {error}"),
         }
     }
 }
