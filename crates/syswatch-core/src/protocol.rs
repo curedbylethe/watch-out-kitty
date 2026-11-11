@@ -3,6 +3,7 @@
 //! Messages use one UTF-8 JSON value per line. See the repository README for
 //! the wire examples and framing contract.
 
+use serde::de::IntoDeserializer;
 use serde::{Deserialize, Serialize};
 
 use crate::snapshot::{AggregateSnapshot, ProcessSnapshot, SystemSnapshot};
@@ -175,10 +176,11 @@ pub fn decode_request(line: &str) -> Result<Request, ProtocolError> {
     }
 
     let raw: RawRequest = serde_json::from_str(line).map_err(|_| malformed_request())?;
-    let command = match raw.command.as_str() {
-        "status" => RequestCommand::Status,
-        "processes" => RequestCommand::Processes,
-        _ => {
+    let deserializer: serde::de::value::StrDeserializer<'_, serde::de::value::Error> =
+        raw.command.as_str().into_deserializer();
+    let command = match RequestCommand::deserialize(deserializer) {
+        Ok(command) => command,
+        Err(_) => {
             let command: String = raw.command.chars().take(64).collect();
             return Err(ProtocolError {
                 code: ErrorCode::UnsupportedCommand,
