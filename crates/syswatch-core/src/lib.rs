@@ -3,6 +3,8 @@
 pub mod collector;
 pub mod config;
 pub mod history;
+#[cfg(unix)]
+pub mod ipc;
 pub mod protocol;
 pub mod report;
 pub mod snapshot;
