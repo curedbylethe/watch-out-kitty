@@ -5,7 +5,7 @@ use std::{
 
 use sysinfo::{MemoryRefreshKind, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
-use crate::snapshot::{MemorySnapshot, ProcessSnapshot, SystemSnapshot};
+use crate::snapshot::{AggregateSnapshot, MemorySnapshot, ProcessSnapshot, SystemSnapshot};
 
 /// Stateful collector for aggregate CPU and physical-memory usage.
 pub struct Collector {
@@ -14,6 +14,9 @@ pub struct Collector {
     last_cpu_usage_percent: f32,
     last_cpu_sample_ms: Option<u64>,
     last_processes_updated_ms: Option<u64>,
+    cached_processes: Vec<ProcessSnapshot>,
+    #[cfg(test)]
+    process_refresh_calls: usize,
 }
 
 impl Collector {
@@ -25,17 +28,14 @@ impl Collector {
             last_cpu_usage_percent: 0.0,
             last_cpu_sample_ms: None,
             last_processes_updated_ms: None,
+            cached_processes: Vec::new(),
+            #[cfg(test)]
+            process_refresh_calls: 0,
         })
     }
 
-    /// Refreshes memory on every call and CPU only after the minimum interval.
-    ///
-    /// The first call primes CPU counters and reports `0.0`; a later call at
-    /// least `sysinfo::MINIMUM_CPU_UPDATE_INTERVAL` later reports CPU usage.
-    /// Calls inside that interval reuse the prior CPU value. On macOS,
-    /// occupied RAM does not equal memory pressure. The first per-process CPU
-    /// sample may not be representative.
-    pub fn refresh(&mut self) -> SystemSnapshot {
+    /// Refreshes memory and CPU without enumerating processes.
+    pub fn refresh_aggregate(&mut self) -> AggregateSnapshot {
         let observed_at_ms = timestamp_ms();
         let now = Instant::now();
         let cpu_refresh_due = cpu_refresh_due(self.last_cpu_refresh, now);
@@ -52,6 +52,19 @@ impl Collector {
             self.last_cpu_refresh = Some(Instant::now());
         }
 
+        AggregateSnapshot {
+            timestamp_ms: observed_at_ms,
+            cpu_usage_percent: self.last_cpu_usage_percent,
+            cpu_updated_at_ms: self.last_cpu_sample_ms,
+            memory: MemorySnapshot {
+                total_bytes: self.system.total_memory(),
+                used_bytes: self.system.used_memory(),
+            },
+        }
+    }
+
+    /// Refreshes process observations and returns the cached slice.
+    pub fn refresh_processes(&mut self) -> &[ProcessSnapshot] {
         self.system.refresh_processes_specifics(
             ProcessesToUpdate::All,
             true,
@@ -60,8 +73,12 @@ impl Collector {
                 .with_memory()
                 .without_tasks(),
         );
+        #[cfg(test)]
+        {
+            self.process_refresh_calls += 1;
+        }
 
-        let processes = self
+        self.cached_processes = self
             .system
             .processes()
             .values()
@@ -77,19 +94,45 @@ impl Collector {
             })
             .collect();
         self.last_processes_updated_ms = Some(timestamp_ms());
+        &self.cached_processes
+    }
 
-        let memory = MemorySnapshot {
-            total_bytes: self.system.total_memory(),
-            used_bytes: self.system.used_memory(),
+    /// Returns the latest process observations without refreshing them.
+    pub fn cached_processes(&self) -> &[ProcessSnapshot] {
+        &self.cached_processes
+    }
+
+    /// Returns when the cached process observations were collected.
+    pub fn processes_updated_at_ms(&self) -> Option<u64> {
+        self.last_processes_updated_ms
+    }
+
+    /// Refreshes memory on every call and CPU only after the minimum interval.
+    ///
+    /// The first call primes CPU counters and reports `0.0`; a later call at
+    /// least `sysinfo::MINIMUM_CPU_UPDATE_INTERVAL` later reports CPU usage.
+    /// Calls inside that interval reuse the prior CPU value. On macOS,
+    /// occupied RAM does not equal memory pressure. The first per-process CPU
+    /// sample may not be representative.
+    pub fn refresh(&mut self) -> SystemSnapshot {
+        let aggregate = self.refresh_aggregate();
+        let processes = {
+            self.refresh_processes();
+            self.cached_processes().to_vec()
         };
         snapshot_at(
-            observed_at_ms,
-            self.last_cpu_usage_percent,
-            self.last_cpu_sample_ms,
-            memory,
+            aggregate.timestamp_ms,
+            aggregate.cpu_usage_percent,
+            aggregate.cpu_updated_at_ms,
+            aggregate.memory,
             processes,
             self.last_processes_updated_ms,
         )
+    }
+
+    #[cfg(test)]
+    fn process_refresh_calls(&self) -> usize {
+        self.process_refresh_calls
     }
 }
 
@@ -249,6 +292,86 @@ mod tests {
     }
 
     #[test]
+    fn aggregate_refresh_does_not_enumerate_processes() {
+        let mut collector = Collector::new().unwrap();
+
+        collector.refresh_aggregate();
+        collector.refresh_aggregate();
+
+        assert_eq!(collector.process_refresh_calls(), 0);
+        assert!(collector.cached_processes().is_empty());
+        assert_eq!(collector.processes_updated_at_ms(), None);
+    }
+
+    #[test]
+    fn aggregate_refresh_preserves_cached_processes() {
+        let mut collector = Collector::new().unwrap();
+        collector.refresh();
+        let identities: Vec<_> = collector
+            .cached_processes()
+            .iter()
+            .map(ProcessSnapshot::identity)
+            .collect();
+        let updated_at = collector.processes_updated_at_ms();
+        let calls = collector.process_refresh_calls();
+
+        collector.refresh_aggregate();
+
+        assert_eq!(
+            collector
+                .cached_processes()
+                .iter()
+                .map(ProcessSnapshot::identity)
+                .collect::<Vec<_>>(),
+            identities
+        );
+        assert_eq!(collector.processes_updated_at_ms(), updated_at);
+        assert_eq!(collector.process_refresh_calls(), calls);
+    }
+
+    #[test]
+    fn aggregate_refresh_preserves_cpu_warm_up() {
+        let mut collector = Collector::new().unwrap();
+        assert_eq!(collector.refresh_aggregate().cpu_updated_at_ms, None);
+        assert_eq!(collector.refresh_aggregate().cpu_updated_at_ms, None);
+
+        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL + Duration::from_millis(1));
+        let sample = collector.refresh_aggregate();
+        assert!(sample.cpu_updated_at_ms.is_some());
+        assert!(sample.cpu_usage_percent.is_finite());
+    }
+
+    #[test]
+    fn process_timestamp_changes_only_on_process_refresh() {
+        let mut collector = Collector::new().unwrap();
+        assert_eq!(collector.processes_updated_at_ms(), None);
+        collector.refresh_aggregate();
+        assert_eq!(collector.processes_updated_at_ms(), None);
+
+        collector.refresh_processes();
+        let updated_at = collector.processes_updated_at_ms();
+        assert!(updated_at.is_some());
+        collector.refresh_aggregate();
+        assert_eq!(collector.processes_updated_at_ms(), updated_at);
+    }
+
+    #[test]
+    fn full_refresh_enumerates_once() {
+        let mut collector = Collector::new().unwrap();
+        let snapshot = collector.refresh();
+
+        assert_eq!(collector.process_refresh_calls(), 1);
+        assert!(
+            snapshot
+                .processes
+                .iter()
+                .any(|p| p.pid == std::process::id())
+        );
+        assert_eq!(snapshot.cpu_updated_at_ms, None);
+        assert!(snapshot.processes_updated_at_ms.is_some());
+    }
+
+    #[test]
     fn process_snapshot_copies_fields() {
         let process = process_snapshot(
             42,
@@ -300,8 +423,7 @@ mod tests {
 
         assert!(
             collector
-                .refresh()
-                .processes
+                .refresh_processes()
                 .iter()
                 .any(|process| process.pid == pid)
         );
@@ -310,8 +432,7 @@ mod tests {
 
         assert!(
             !collector
-                .refresh()
-                .processes
+                .refresh_processes()
                 .iter()
                 .any(|process| process.pid == pid)
         );
