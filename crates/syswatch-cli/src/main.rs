@@ -16,13 +16,9 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let (request_command, sort, limit) = match command {
-        args::Command::Status => (syswatch_core::protocol::RequestCommand::Status, None, 0),
-        args::Command::Top { sort, limit } => (
-            syswatch_core::protocol::RequestCommand::Processes,
-            Some(sort),
-            limit,
-        ),
+    let request_command = match &command {
+        args::Command::Status => syswatch_core::protocol::RequestCommand::Status,
+        args::Command::Top { .. } => syswatch_core::protocol::RequestCommand::Processes,
         args::Command::Help => {
             println!("{}", args::USAGE);
             return;
@@ -51,9 +47,11 @@ fn main() {
         .unwrap_or_default()
         .as_millis()
         .min(u64::MAX as u128) as u64;
-    let rendered = match sort {
-        Some(sort) => output::render_top(&response, sort, limit, now_ms),
-        None => output::render_status(&response, now_ms),
+    let rendered = match command {
+        args::Command::Status => output::render_status(&response, now_ms),
+        args::Command::Top { sort, limit } => output::render_top(&response, sort, limit, now_ms),
+        args::Command::Help => return,
+        args::Command::TopHelp => return,
     };
     match rendered {
         Ok(output) => println!("{output}"),
