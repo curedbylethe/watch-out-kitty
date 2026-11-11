@@ -226,9 +226,6 @@ where
             if line.ends_with('\n') {
                 line.pop();
             }
-            if line.ends_with('\r') {
-                line.pop();
-            }
             match decode_request(&line) {
                 Ok(request) => match (latest)() {
                     Some(snapshot) => match request.command {
@@ -502,6 +499,15 @@ mod tests {
         let dir = TempDir::new();
         let server = server(dir.socket());
         assert!(request(&dir.socket(), "not json\n").contains("\"code\":\"malformed_request\""));
+        server.shutdown().unwrap();
+    }
+
+    #[test]
+    fn rejects_crlf_request_lines() {
+        let dir = TempDir::new();
+        let server = server(dir.socket());
+        let response = request(&dir.socket(), "{\"version\":1,\"command\":\"status\"}\r\n");
+        assert!(response.contains("\"code\":\"malformed_request\""));
         server.shutdown().unwrap();
     }
 
