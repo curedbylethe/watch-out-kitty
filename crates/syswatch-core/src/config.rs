@@ -158,10 +158,6 @@ mod tests {
 
     const CPU_MINIMUM: Duration = Duration::from_millis(200);
 
-    fn below_minimum(minimum: Duration) -> Option<Duration> {
-        minimum.checked_sub(Duration::from_nanos(1))
-    }
-
     #[test]
     fn default_intervals_are_one_and_five_seconds() {
         let config = MonitoringConfig::default();
@@ -192,9 +188,9 @@ mod tests {
 
     #[test]
     fn rejects_aggregate_below_cpu_minimum() {
-        let Some(below) = below_minimum(CPU_MINIMUM) else {
-            return;
-        };
+        let below = CPU_MINIMUM
+            .checked_sub(Duration::from_nanos(1))
+            .expect("test CPU minimum is nonzero");
 
         assert_eq!(
             validate_intervals(below, CPU_MINIMUM, CPU_MINIMUM),
@@ -204,9 +200,9 @@ mod tests {
 
     #[test]
     fn rejects_process_below_cpu_minimum() {
-        let Some(below) = below_minimum(CPU_MINIMUM) else {
-            return;
-        };
+        let below = CPU_MINIMUM
+            .checked_sub(Duration::from_nanos(1))
+            .expect("test CPU minimum is nonzero");
 
         assert_eq!(
             validate_intervals(CPU_MINIMUM, below, CPU_MINIMUM),
