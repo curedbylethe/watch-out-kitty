@@ -12,6 +12,8 @@ pub struct Collector {
     system: System,
     last_cpu_refresh: Option<Instant>,
     last_cpu_usage_percent: f32,
+    last_cpu_sample_ms: Option<u64>,
+    last_processes_updated_ms: Option<u64>,
 }
 
 impl Collector {
@@ -21,6 +23,8 @@ impl Collector {
             system: System::new()?,
             last_cpu_refresh: None,
             last_cpu_usage_percent: 0.0,
+            last_cpu_sample_ms: None,
+            last_processes_updated_ms: None,
         })
     }
 
@@ -32,6 +36,7 @@ impl Collector {
     /// occupied RAM does not equal memory pressure. The first per-process CPU
     /// sample may not be representative.
     pub fn refresh(&mut self) -> SystemSnapshot {
+        let observed_at_ms = timestamp_ms();
         let now = Instant::now();
         let cpu_refresh_due = cpu_refresh_due(self.last_cpu_refresh, now);
 
@@ -42,6 +47,7 @@ impl Collector {
             self.system.refresh_cpu_usage();
             if self.last_cpu_refresh.is_some() {
                 self.last_cpu_usage_percent = self.system.global_cpu_usage();
+                self.last_cpu_sample_ms = Some(observed_at_ms);
             }
             self.last_cpu_refresh = Some(Instant::now());
         }
@@ -70,16 +76,19 @@ impl Collector {
                 )
             })
             .collect();
+        self.last_processes_updated_ms = Some(timestamp_ms());
 
         let memory = MemorySnapshot {
             total_bytes: self.system.total_memory(),
             used_bytes: self.system.used_memory(),
         };
         snapshot_at(
-            timestamp_ms(),
+            observed_at_ms,
             self.last_cpu_usage_percent,
+            self.last_cpu_sample_ms,
             memory,
             processes,
+            self.last_processes_updated_ms,
         )
     }
 }
@@ -118,14 +127,18 @@ fn process_snapshot(
 fn snapshot_at(
     timestamp_ms: u64,
     cpu_usage_percent: f32,
+    cpu_updated_at_ms: Option<u64>,
     memory: MemorySnapshot,
     processes: Vec<ProcessSnapshot>,
+    processes_updated_at_ms: Option<u64>,
 ) -> SystemSnapshot {
     SystemSnapshot {
         timestamp_ms,
         cpu_usage_percent,
+        cpu_updated_at_ms,
         memory,
         processes,
+        processes_updated_at_ms,
     }
 }
 
@@ -183,12 +196,21 @@ mod tests {
             memory_bytes: 4096,
             start_time_secs: 1_700_000_000,
         }];
-        let snapshot = snapshot_at(123, 42.5, memory.clone(), processes.clone());
+        let snapshot = snapshot_at(
+            123,
+            42.5,
+            Some(123),
+            memory.clone(),
+            processes.clone(),
+            Some(124),
+        );
 
         assert_eq!(snapshot.timestamp_ms, 123);
         assert_eq!(snapshot.cpu_usage_percent, 42.5);
+        assert_eq!(snapshot.cpu_updated_at_ms, Some(123));
         assert_eq!(snapshot.memory, memory);
         assert_eq!(snapshot.processes, processes);
+        assert_eq!(snapshot.processes_updated_at_ms, Some(124));
     }
 
     #[test]
@@ -197,6 +219,8 @@ mod tests {
 
         let first = collector.refresh();
         assert_eq!(first.cpu_usage_percent, 0.0);
+        assert_eq!(first.cpu_updated_at_ms, None);
+        assert!(first.processes_updated_at_ms.is_some());
         assert!(
             first
                 .processes
@@ -210,6 +234,18 @@ mod tests {
                 .iter()
                 .any(|process| process.pid == std::process::id())
         );
+    }
+
+    #[test]
+    fn collector_refresh_tracks_cpu_sample_time_after_warm_up() {
+        let mut collector = Collector::new().unwrap();
+        assert_eq!(collector.refresh().cpu_updated_at_ms, None);
+
+        std::thread::sleep(sysinfo::MINIMUM_CPU_UPDATE_INTERVAL + Duration::from_millis(1));
+        let snapshot = collector.refresh();
+
+        assert!(snapshot.cpu_updated_at_ms.is_some());
+        assert_eq!(snapshot.cpu_updated_at_ms, Some(snapshot.timestamp_ms));
     }
 
     #[test]
