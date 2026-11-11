@@ -4,10 +4,12 @@
 
 The Rust 2024 workspace contains `crates/syswatch-core` for telemetry,
 `crates/syswatch-daemon` for foreground sampling, and `crates/syswatch-cli` for status
-output. The core exposes system collection, snapshot data types, and text
-reporting through `src/collector.rs`, `src/snapshot.rs`, and `src/report.rs`. Its
-`examples/snapshot.rs` prints one diagnostic snapshot. See `README.md` for
-setup and the example.
+and process-ranking output. The core exposes system collection, bounded process
+history, socket path resolution, snapshot data types, and text reporting through
+`src/collector.rs`, `src/history.rs`, `src/ipc.rs`, `src/snapshot.rs`, and
+`src/report.rs`. The CLI modules are `src/args.rs`, `src/client.rs`,
+`src/output.rs`, and `src/main.rs`. The core's `examples/snapshot.rs` prints one
+diagnostic snapshot. See `README.md` for setup and the example.
 
 ## Architecture boundary
 
