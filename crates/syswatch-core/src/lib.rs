@@ -5,7 +5,7 @@ pub mod history;
 pub mod report;
 pub mod snapshot;
 pub use collector::Collector;
-pub use history::{ProcessHistory, ProcessObservation, ProcessRecord};
+pub use history::{HistoryLimits, ProcessHistory, ProcessObservation, ProcessRecord};
 pub use snapshot::{AggregateSnapshot, MemorySnapshot, ProcessSnapshot, SystemSnapshot};
 
 #[cfg(test)]

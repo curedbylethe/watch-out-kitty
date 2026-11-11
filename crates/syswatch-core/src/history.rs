@@ -179,6 +179,156 @@ mod tests {
         assert_eq!(history.get((7, 10)).unwrap().disappeared_at_ms, Some(200));
         assert_eq!(history.get((7, 11)).unwrap().disappeared_at_ms, None);
     }
+
+    fn limits(
+        max_processes: usize,
+        max_observations_per_process: usize,
+        max_age_ms: u64,
+    ) -> HistoryLimits {
+        HistoryLimits {
+            max_processes,
+            max_observations_per_process,
+            max_age_ms,
+        }
+    }
+
+    #[test]
+    fn observation_count_is_capped() {
+        let mut history = ProcessHistory::with_limits(limits(10, 3, 10_000));
+        for timestamp in 1..=5 {
+            history.record_scan(timestamp, &[process(7, 10, "worker", 1.0, timestamp)]);
+        }
+
+        let observations = history.get((7, 10)).unwrap().observations();
+        assert_eq!(
+            observations
+                .iter()
+                .map(|o| o.memory_bytes)
+                .collect::<Vec<_>>(),
+            [3, 4, 5]
+        );
+        assert_eq!(
+            observations
+                .iter()
+                .map(|o| o.timestamp_ms)
+                .collect::<Vec<_>>(),
+            [3, 4, 5]
+        );
+    }
+
+    #[test]
+    fn observation_age_is_capped() {
+        let mut history = ProcessHistory::with_limits(limits(10, 10, 100));
+        for timestamp in [0, 50, 200] {
+            history.record_scan(timestamp, &[process(7, 10, "worker", 1.0, timestamp)]);
+        }
+
+        let observations = history.get((7, 10)).unwrap().observations();
+        assert_eq!(
+            observations
+                .iter()
+                .map(|o| o.timestamp_ms)
+                .collect::<Vec<_>>(),
+            [200]
+        );
+    }
+
+    #[test]
+    fn process_count_evicts_oldest_last_seen() {
+        let mut history = ProcessHistory::with_limits(limits(2, 10, 10_000));
+        history.record_scan(100, &[process(1, 1, "one", 1.0, 1)]);
+        history.record_scan(200, &[process(2, 2, "two", 1.0, 2)]);
+        history.record_scan(300, &[process(3, 3, "three", 1.0, 3)]);
+
+        let identities = history
+            .iter()
+            .map(ProcessRecord::identity)
+            .collect::<Vec<_>>();
+        assert_eq!(identities, [(2, 2), (3, 3)]);
+    }
+
+    #[test]
+    fn process_count_tie_breaks_on_identity() {
+        let mut history = ProcessHistory::with_limits(limits(2, 10, 10_000));
+        history.record_scan(
+            100,
+            &[
+                process(3, 1, "three", 1.0, 3),
+                process(1, 1, "one", 1.0, 1),
+                process(2, 1, "two", 1.0, 2),
+            ],
+        );
+
+        let identities = history
+            .iter()
+            .map(ProcessRecord::identity)
+            .collect::<Vec<_>>();
+        assert_eq!(identities, [(2, 1), (3, 1)]);
+    }
+
+    #[test]
+    fn process_age_evicts_stale_entry() {
+        let mut history = ProcessHistory::with_limits(limits(10, 10, 100));
+        history.record_scan(0, &[process(1, 1, "old", 1.0, 1)]);
+        history.record_scan(200, &[process(2, 2, "new", 1.0, 2)]);
+
+        assert_eq!(
+            history
+                .iter()
+                .map(ProcessRecord::identity)
+                .collect::<Vec<_>>(),
+            [(2, 2)]
+        );
+    }
+
+    #[test]
+    fn zero_max_processes_retains_nothing() {
+        let mut history = ProcessHistory::with_limits(limits(0, 10, 10_000));
+        history.record_scan(100, &[process(1, 1, "worker", 1.0, 1)]);
+
+        assert!(history.is_empty());
+    }
+
+    #[test]
+    fn zero_max_observations_keeps_metadata() {
+        let mut history = ProcessHistory::with_limits(limits(10, 0, 10_000));
+        history.record_scan(100, &[process(1, 1, "worker", 1.0, 1)]);
+
+        let record = history.get((1, 1)).unwrap();
+        assert_eq!(record.name, "worker");
+        assert!(record.observations().is_empty());
+    }
+
+    #[test]
+    fn eviction_does_not_mark_disappearance() {
+        let mut history = ProcessHistory::with_limits(limits(1, 10, 10_000));
+        history.record_scan(100, &[process(1, 1, "old", 1.0, 1)]);
+        history.record_scan(200, &[process(2, 2, "new", 1.0, 2)]);
+
+        assert!(history.get((1, 1)).is_none());
+        assert_eq!(history.get((2, 2)).unwrap().disappeared_at_ms, None);
+    }
+
+    #[test]
+    fn retention_is_deterministic_across_repeated_runs() {
+        let run = || {
+            let mut history = ProcessHistory::with_limits(limits(2, 2, 10_000));
+            history.record_scan(
+                100,
+                &[
+                    process(3, 1, "three", 1.0, 3),
+                    process(1, 1, "one", 1.0, 1),
+                    process(2, 1, "two", 1.0, 2),
+                ],
+            );
+            history
+                .iter()
+                .map(ProcessRecord::identity)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(run(), run());
+    }
 }
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -193,6 +343,31 @@ pub struct ProcessObservation {
     pub cpu_usage_percent: Option<f32>,
     /// Process memory in bytes.
     pub memory_bytes: u64,
+}
+
+/// Retention limits for process history.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HistoryLimits {
+    /// Maximum number of process identities retained.
+    pub max_processes: usize,
+    /// Maximum observations retained for each process.
+    pub max_observations_per_process: usize,
+    /// Maximum age of retained records and observations in milliseconds.
+    pub max_age_ms: u64,
+}
+
+impl Default for HistoryLimits {
+    fn default() -> Self {
+        const MAX_PROCESSES: usize = 1_024;
+        const MAX_OBSERVATIONS_PER_PROCESS: usize = 60;
+        const MAX_AGE_MS: u64 = 600_000;
+
+        Self {
+            max_processes: MAX_PROCESSES,
+            max_observations_per_process: MAX_OBSERVATIONS_PER_PROCESS,
+            max_age_ms: MAX_AGE_MS,
+        }
+    }
 }
 
 /// Observations and metadata for one process identity.
@@ -237,14 +412,21 @@ impl ProcessRecord {
 pub struct ProcessHistory {
     records: BTreeMap<(u32, u64), ProcessRecord>,
     last_scan_ms: Option<u64>,
+    limits: HistoryLimits,
 }
 
 impl ProcessHistory {
     /// Creates an empty process history.
     pub fn new() -> Self {
+        Self::with_limits(HistoryLimits::default())
+    }
+
+    /// Creates an empty process history with explicit retention limits.
+    pub fn with_limits(limits: HistoryLimits) -> Self {
         Self {
             records: BTreeMap::new(),
             last_scan_ms: None,
+            limits,
         }
     }
 
@@ -303,6 +485,28 @@ impl ProcessHistory {
             self.last_scan_ms
                 .map_or(timestamp_ms, |last| last.max(timestamp_ms)),
         );
+
+        for record in self.records.values_mut() {
+            record.observations.retain(|observation| {
+                timestamp_ms.saturating_sub(observation.timestamp_ms) <= self.limits.max_age_ms
+            });
+            while record.observations.len() > self.limits.max_observations_per_process {
+                record.observations.pop_front();
+            }
+        }
+
+        self.records.retain(|_, record| {
+            timestamp_ms.saturating_sub(record.last_seen_ms) <= self.limits.max_age_ms
+        });
+        while self.records.len() > self.limits.max_processes {
+            let oldest = self
+                .records
+                .iter()
+                .min_by_key(|(identity, record)| (record.last_seen_ms, **identity))
+                .map(|(identity, _)| *identity)
+                .unwrap();
+            self.records.remove(&oldest);
+        }
     }
 
     /// Returns a record by process identity.
@@ -328,6 +532,11 @@ impl ProcessHistory {
     /// Returns the greatest timestamp of any ingested process scan.
     pub fn last_scan_ms(&self) -> Option<u64> {
         self.last_scan_ms
+    }
+
+    /// Returns the active retention limits.
+    pub fn limits(&self) -> HistoryLimits {
+        self.limits
     }
 }
 
