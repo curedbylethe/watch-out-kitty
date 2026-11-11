@@ -158,14 +158,13 @@ mod tests {
     }
 
     #[test]
-    fn disappearance_timestamp_never_precedes_last_seen() {
+    fn stale_scan_does_not_mark_later_sighting_disappeared() {
         let mut history = ProcessHistory::new();
         history.record_scan(1_000, &[process(7, 10, "worker", 1.0, 20)]);
         history.record_scan(500, &[]);
 
         let record = history.get((7, 10)).unwrap();
-        assert_eq!(record.disappeared_at_ms, Some(1_000));
-        assert!(record.disappeared_at_ms.unwrap() >= record.last_seen_ms);
+        assert_eq!(record.disappeared_at_ms, None);
         assert_eq!(history.last_scan_ms(), Some(1_000));
     }
 
@@ -435,8 +434,11 @@ impl ProcessHistory {
         let identities: BTreeSet<_> = processes.iter().map(ProcessSnapshot::identity).collect();
         if self.last_scan_ms.is_some() {
             for (identity, record) in &mut self.records {
-                if !identities.contains(identity) && record.disappeared_at_ms.is_none() {
-                    record.disappeared_at_ms = Some(timestamp_ms.max(record.last_seen_ms));
+                if timestamp_ms >= record.last_seen_ms
+                    && !identities.contains(identity)
+                    && record.disappeared_at_ms.is_none()
+                {
+                    record.disappeared_at_ms = Some(timestamp_ms);
                 }
             }
         }
