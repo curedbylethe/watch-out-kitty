@@ -11,7 +11,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use syswatch_core::{
@@ -208,18 +208,42 @@ where
     }
 }
 
+struct DeadlineReader<'a> {
+    stream: &'a UnixStream,
+    deadline: Instant,
+}
+
+impl Read for DeadlineReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let remaining = self.deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::from(io::ErrorKind::TimedOut));
+        }
+        self.stream.set_read_timeout(Some(remaining))?;
+        self.stream.read(buf)
+    }
+}
+
 fn handle_client<F>(mut stream: UnixStream, latest: &F)
 where
     F: Fn() -> Option<SystemSnapshot>,
 {
     if stream.set_nonblocking(false).is_err()
-        || stream.set_read_timeout(Some(READ_TIMEOUT)).is_err()
         || stream.set_write_timeout(Some(WRITE_TIMEOUT)).is_err()
     {
         return;
     }
     let mut line = String::new();
-    let read = BufReader::new((&stream).take((MAX_REQUEST_BYTES + 1) as u64)).read_line(&mut line);
+    let reader = DeadlineReader {
+        stream: &stream,
+        deadline: Instant::now() + READ_TIMEOUT,
+    };
+    let read = BufReader::new(reader)
+        .take((MAX_REQUEST_BYTES + 1) as u64)
+        .read_line(&mut line);
     let response = match read {
         Ok(0) => return,
         Ok(_) => {
@@ -260,7 +284,7 @@ mod tests {
     use super::*;
     use std::{
         os::unix::fs::PermissionsExt,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     };
     use syswatch_core::{MemorySnapshot, ProcessSnapshot};
 
@@ -334,14 +358,9 @@ mod tests {
     }
 
     #[test]
-    fn handles_delayed_request_on_nonblocking_accepted_stream() {
+    fn handles_delayed_request_after_accept() {
         let dir = TempDir::new();
-        let listener = UnixListener::bind(dir.socket()).unwrap();
-        let handler = thread::spawn(move || {
-            let (stream, _) = listener.accept().unwrap();
-            stream.set_nonblocking(true).unwrap();
-            handle_client(stream, &|| Some(snapshot()));
-        });
+        let server = server(dir.socket());
         let mut stream = UnixStream::connect(dir.socket()).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(2)))
@@ -353,7 +372,7 @@ mod tests {
         let mut response = String::new();
         assert!(BufReader::new(stream).read_line(&mut response).unwrap() > 0);
         assert!(response.contains("\"kind\":\"status\""));
-        handler.join().unwrap();
+        server.shutdown().unwrap();
     }
 
     #[test]
@@ -480,6 +499,37 @@ mod tests {
         let mut response = String::new();
         assert_eq!(BufReader::new(stream).read_line(&mut response).unwrap(), 0);
         server.shutdown().unwrap();
+    }
+
+    #[test]
+    fn bounds_slow_drip_client_shutdown() {
+        let dir = TempDir::new();
+        let server = server(dir.socket());
+        let mut client = UnixStream::connect(dir.socket()).unwrap();
+        client.write_all(b"{").unwrap();
+        let keep_writing = Arc::new(AtomicBool::new(true));
+        let writer_flag = Arc::clone(&keep_writing);
+        let writer = thread::spawn(move || {
+            while writer_flag.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_millis(100));
+                if client.write_all(b" ").is_err() {
+                    break;
+                }
+            }
+        });
+        let (finished, done) = std::sync::mpsc::channel();
+        let shutdown = thread::spawn(move || finished.send(server.shutdown()).unwrap());
+        let timely = done.recv_timeout(Duration::from_millis(900));
+        let completed_timely = timely.is_ok();
+        keep_writing.store(false, Ordering::SeqCst);
+        writer.join().unwrap();
+        let result = match timely {
+            Ok(result) => result,
+            Err(_) => done.recv_timeout(Duration::from_secs(2)).unwrap(),
+        };
+        shutdown.join().unwrap();
+        assert!(completed_timely, "slow client delayed server shutdown");
+        result.unwrap();
     }
 
     #[test]
