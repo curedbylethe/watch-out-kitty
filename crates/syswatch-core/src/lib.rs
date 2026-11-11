@@ -1,10 +1,12 @@
 //! Core types and logic for syswatch.
 
 pub mod collector;
+pub mod config;
 pub mod history;
 pub mod report;
 pub mod snapshot;
 pub use collector::Collector;
+pub use config::{ConfigError, MonitoringConfig};
 pub use history::{HistoryLimits, ProcessHistory, ProcessObservation, ProcessRecord};
 pub use snapshot::{AggregateSnapshot, MemorySnapshot, ProcessSnapshot, SystemSnapshot};
 
