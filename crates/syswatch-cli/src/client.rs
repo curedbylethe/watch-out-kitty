@@ -46,12 +46,9 @@ pub fn request_status(path: &Path, timeout: Duration) -> Result<Response, Client
         };
         ClientError::Connect(message)
     })?;
-    stream
-        .set_read_timeout(Some(timeout))
-        .and_then(|()| stream.set_write_timeout(Some(timeout)))
-        .map_err(|error| {
-            ClientError::Write(format!("cannot configure daemon connection: {error}"))
-        })?;
+    stream.set_write_timeout(Some(timeout)).map_err(|error| {
+        ClientError::Write(format!("cannot configure daemon connection: {error}"))
+    })?;
 
     let mut request = protocol::encode_line(&Request {
         version: protocol::PROTOCOL_VERSION,
@@ -101,12 +98,10 @@ pub fn request_status(path: &Path, timeout: Duration) -> Result<Response, Client
                 continue;
             }
             Err(error) => {
-                return Err(io_timeout(&error, timeout, path).unwrap_or_else(|| {
-                    ClientError::Read(format!(
-                        "cannot read response from daemon at {}: {error}",
-                        path.display()
-                    ))
-                }));
+                return Err(ClientError::Read(format!(
+                    "cannot read response from daemon at {}: {error}",
+                    path.display()
+                )));
             }
         }
     }
