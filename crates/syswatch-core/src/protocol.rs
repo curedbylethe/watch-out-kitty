@@ -152,23 +152,29 @@ pub fn decode_request(line: &str) -> Result<Request, ProtocolError> {
     }
 
     #[derive(Deserialize)]
+    struct Head {
+        version: u32,
+    }
+
+    let head: Head = serde_json::from_str(line).map_err(|_| malformed_request())?;
+
+    if head.version != PROTOCOL_VERSION {
+        return Err(ProtocolError {
+            code: ErrorCode::UnsupportedVersion,
+            message: format!(
+                "unsupported protocol version {}; this server speaks {}",
+                head.version, PROTOCOL_VERSION
+            ),
+        });
+    }
+
+    #[derive(Deserialize)]
     struct RawRequest {
         version: u32,
         command: String,
     }
 
     let raw: RawRequest = serde_json::from_str(line).map_err(|_| malformed_request())?;
-
-    if raw.version != PROTOCOL_VERSION {
-        return Err(ProtocolError {
-            code: ErrorCode::UnsupportedVersion,
-            message: format!(
-                "unsupported protocol version {}; this server speaks {}",
-                raw.version, PROTOCOL_VERSION
-            ),
-        });
-    }
-
     let command = match raw.command.as_str() {
         "status" => RequestCommand::Status,
         "processes" => RequestCommand::Processes,
@@ -182,7 +188,7 @@ pub fn decode_request(line: &str) -> Result<Request, ProtocolError> {
     };
 
     Ok(Request {
-        version: raw.version,
+        version: head.version,
         command,
     })
 }
@@ -275,6 +281,12 @@ mod tests {
             assert!(error.message.contains(&version.to_string()));
             assert!(error.message.contains(&PROTOCOL_VERSION.to_string()));
         }
+    }
+
+    #[test]
+    fn unsupported_version_precedes_future_command_shape() {
+        let error = decode_request(r#"{"version":2,"command":{"name":"status"}}"#).unwrap_err();
+        assert_eq!(error.code, ErrorCode::UnsupportedVersion);
     }
 
     #[test]
