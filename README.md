@@ -77,7 +77,8 @@ value per line. Each request and reply uses one line with no embedded newline.
 Clients send one request per line and read each reply through its line ending.
 Requests over 4096 bytes are rejected. A transport reader must cap buffered
 input at `MAX_REQUEST_BYTES + 1` bytes while waiting for LF; if no LF appears
-within that bound, it must return `malformed_request`.
+within that bound, it must return `malformed_request`. Lines end with LF only;
+CR is rejected.
 
 Protocol version is `1`. Clients send the version they speak. The server reports
 `unsupported_version` with both version numbers when they differ. Changes to
