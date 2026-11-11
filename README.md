@@ -96,6 +96,13 @@ The two read-only requests and example replies:
 {"kind":"error","version":1,"code":"unavailable","message":"process data has not been collected yet"}
 ```
 
+`cpu_updated_at_ms`, `process_count`, and `processes_updated_at_ms` can be
+`null` during warm-up. For example:
+
+```text
+{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":0.0,"cpu_updated_at_ms":null,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":null,"processes_updated_at_ms":null}
+```
+
 | Error code | Meaning |
 | :--- | :--- |
 | `unsupported_version` | Requested protocol version is not supported. |
