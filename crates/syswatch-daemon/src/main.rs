@@ -14,7 +14,31 @@ fn run() -> Result<(), DaemonError> {
         config.aggregate_interval(),
         config.process_interval()
     );
+    let socket = match syswatch_core::ipc::socket_path() {
+        Ok(socket) => socket,
+        Err(error) => {
+            signal_handle.stop();
+            return Err(DaemonError::SocketPath(error));
+        }
+    };
+    let latest = scheduler.latest_handle();
+    let server = match syswatch_daemon::ipc::start(socket.clone(), move || {
+        latest
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .snapshot()
+    }) {
+        Ok(server) => server,
+        Err(error) => {
+            signal_handle.stop();
+            return Err(DaemonError::Socket(error));
+        }
+    };
+    eprintln!("syswatch-daemon: serving at {}", socket.display());
     let result = scheduler.run().map_err(DaemonError::Scheduler);
+    if let Err(error) = server.shutdown() {
+        eprintln!("syswatch-daemon: socket cleanup: {error}");
+    }
     signal_handle.stop();
     result?;
     eprintln!("syswatch-daemon: stopped");
