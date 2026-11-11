@@ -7,7 +7,7 @@ pub fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
     let mut unit = 0;
-    while value >= 1024.0 && unit < UNITS.len() - 1 {
+    while value >= 1023.95 && unit < UNITS.len() - 1 {
         value /= 1024.0;
         unit += 1;
     }
@@ -129,6 +129,7 @@ mod tests {
         assert_eq!(format_bytes(1023), "1023 B");
         assert_eq!(format_bytes(1024), "1.0 KiB");
         assert_eq!(format_bytes(1536), "1.5 KiB");
+        assert_eq!(format_bytes(1_048_575), "1.0 MiB");
         assert_eq!(format_bytes(1_073_741_824), "1.0 GiB");
         assert_eq!(format_bytes(1_099_511_627_776), "1.0 TiB");
     }
