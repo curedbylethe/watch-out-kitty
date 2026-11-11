@@ -20,6 +20,19 @@ pub struct MemorySnapshot {
     pub used_bytes: u64,
 }
 
+impl MemorySnapshot {
+    /// Returns occupied memory as a percentage of total physical memory.
+    ///
+    /// On macOS, occupied RAM does not equal memory pressure.
+    pub fn usage_percent(&self) -> f32 {
+        if self.total_bytes == 0 {
+            return 0.0;
+        }
+
+        (self.used_bytes as f64 / self.total_bytes as f64 * 100.0).clamp(0.0, 100.0) as f32
+    }
+}
+
 /// One observed process.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProcessSnapshot {
