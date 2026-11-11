@@ -59,9 +59,14 @@ pub fn request_status(path: &Path, timeout: Duration) -> Result<Response, Client
     })
     .map_err(|error| ClientError::Encode(format!("cannot encode request: {error}")))?;
     request.push('\n');
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|error| io_error(error, "send", path, timeout))?;
+    stream.write_all(request.as_bytes()).map_err(|error| {
+        io_timeout(&error, timeout, path).unwrap_or_else(|| {
+            ClientError::Write(format!(
+                "cannot send request to daemon at {}: {error}",
+                path.display()
+            ))
+        })
+    })?;
 
     let deadline = Instant::now() + timeout;
     let read_interval = timeout.min(Duration::from_millis(10));
@@ -95,7 +100,14 @@ pub fn request_status(path: &Path, timeout: Duration) -> Result<Response, Client
             {
                 continue;
             }
-            Err(error) => return Err(io_error(error, "read", path, timeout)),
+            Err(error) => {
+                return Err(io_timeout(&error, timeout, path).unwrap_or_else(|| {
+                    ClientError::Read(format!(
+                        "cannot read response from daemon at {}: {error}",
+                        path.display()
+                    ))
+                }));
+            }
         }
     }
     if bytes.is_empty() {
@@ -140,29 +152,12 @@ pub fn request_status(path: &Path, timeout: Duration) -> Result<Response, Client
     Ok(response)
 }
 
-fn io_error(error: io::Error, action: &str, path: &Path, timeout: Duration) -> ClientError {
-    if matches!(
+fn io_timeout(error: &io::Error, timeout: Duration, path: &Path) -> Option<ClientError> {
+    matches!(
         error.kind(),
         io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-    ) {
-        timeout_error(timeout, path)
-    } else {
-        let message = match action {
-            "send" => format!(
-                "cannot send request to daemon at {}: {error}",
-                path.display()
-            ),
-            _ => format!(
-                "cannot read response from daemon at {}: {error}",
-                path.display()
-            ),
-        };
-        if action == "send" {
-            ClientError::Write(message)
-        } else {
-            ClientError::Read(message)
-        }
-    }
+    )
+    .then(|| timeout_error(timeout, path))
 }
 
 fn timeout_error(timeout: Duration, path: &Path) -> ClientError {
