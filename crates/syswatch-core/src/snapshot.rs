@@ -58,6 +58,46 @@ mod tests {
     use super::{MemorySnapshot, ProcessSnapshot, SystemSnapshot};
 
     #[test]
+    fn zero_total_reports_zero() {
+        let memory = MemorySnapshot {
+            total_bytes: 0,
+            used_bytes: 42,
+        };
+
+        assert_eq!(memory.usage_percent(), 0.0);
+    }
+
+    #[test]
+    fn half_of_total_reports_fifty() {
+        let memory = MemorySnapshot {
+            total_bytes: 16_000,
+            used_bytes: 8_000,
+        };
+
+        assert_eq!(memory.usage_percent(), 50.0);
+    }
+
+    #[test]
+    fn non_round_ratio_reports_fraction() {
+        let memory = MemorySnapshot {
+            total_bytes: 3,
+            used_bytes: 1,
+        };
+
+        assert!(memory.usage_percent() > 0.0 && memory.usage_percent() < 100.0);
+    }
+
+    #[test]
+    fn overshoot_clamps_to_hundred() {
+        let memory = MemorySnapshot {
+            total_bytes: 3,
+            used_bytes: 4,
+        };
+
+        assert_eq!(memory.usage_percent(), 100.0);
+    }
+
+    #[test]
     fn system_snapshot_round_trips() {
         let snapshot = SystemSnapshot {
             timestamp_ms: 1_700_000_000_123,
