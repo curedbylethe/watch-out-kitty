@@ -40,3 +40,10 @@ Global CPU usage is an aggregate from 0% to 100%. Per-process CPU can exceed
 physical memory, not macOS memory pressure. Values are single samples, not
 averages. Process names may contain replacement characters and are truncated
 to 24 characters. Expect differences; do not chase exact equality.
+
+## License
+
+Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for the
+full text.
+
+Copyright 2026 Parsa
