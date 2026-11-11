@@ -16,8 +16,9 @@ cargo run -p syswatch-daemon
 ```
 
 The example prints one snapshot of aggregate CPU, physical memory, and the
-processes using the most memory, then exits. The daemon runs in the foreground
-until interrupted. CI currently runs on Ubuntu 24.04.
+processes using the most memory, then exits. The daemon runs in the foreground.
+Ctrl-C (SIGINT) or SIGTERM stops it cleanly, prints `syswatch-daemon: stopped`,
+and exits with status 0. CI currently runs on Ubuntu 24.04.
 
 ## Current scope
 
