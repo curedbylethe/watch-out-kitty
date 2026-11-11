@@ -209,6 +209,19 @@ mod tests {
     #[test]
     fn sends_one_status_request_and_decodes_response() {
         let (_socket, listener) = Socket::new();
+        let snapshot = syswatch_core::snapshot::SystemSnapshot {
+            timestamp_ms: 1_700_000_000_123,
+            cpu_usage_percent: 42.5,
+            cpu_updated_at_ms: Some(1_700_000_000_123),
+            memory: syswatch_core::MemorySnapshot {
+                total_bytes: 16_000,
+                used_bytes: 8_000,
+            },
+            processes: Vec::new(),
+            processes_updated_at_ms: Some(1_700_000_000_100),
+        };
+        let expected = Response::status(&snapshot);
+        let wire = format!("{}\n", protocol::encode_line(&expected).unwrap());
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = String::new();
@@ -216,10 +229,10 @@ mod tests {
                 .read_line(&mut request)
                 .unwrap();
             assert_eq!(request, "{\"version\":1,\"command\":\"status\"}\n");
-            stream.write_all(b"{\"kind\":\"error\",\"version\":1,\"code\":\"unavailable\",\"message\":\"warming\"}\n").unwrap();
+            stream.write_all(wire.as_bytes()).unwrap();
         });
         let response = request_status(&_socket.0, Duration::from_secs(1)).unwrap();
-        assert!(matches!(response, Response::Error { .. }));
+        assert_eq!(response, expected);
         server.join().unwrap();
     }
 

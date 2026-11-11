@@ -107,6 +107,17 @@ mod tests {
     }
 
     #[test]
+    fn zero_total_memory_renders_zero_percent() {
+        let mut response = status(Some(1), Some(0));
+        if let Response::Status { aggregate, .. } = &mut response {
+            aggregate.memory.total_bytes = 0;
+            aggregate.memory.used_bytes = 42;
+        }
+        let rendered = render_status(&response, 1).unwrap();
+        assert!(rendered.contains("Memory: 42 B / 0 B (0.0%)"));
+    }
+
+    #[test]
     fn age_clamps_future_values() {
         assert_eq!(format_age_ms(10, 11), "0.0s");
     }
