@@ -198,7 +198,7 @@ where
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => {
                 eprintln!("syswatch-daemon: socket accept failed: {error}");
-                break;
+                thread::sleep(ACCEPT_POLL);
             }
         }
     }
