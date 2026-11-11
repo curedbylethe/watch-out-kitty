@@ -143,8 +143,7 @@ fn validate_intervals(
         return Err(ConfigError::ProcessIntervalShorterThanAggregate);
     }
 
-    let now = Instant::now();
-    if now.checked_add(aggregate).is_none() || now.checked_add(process).is_none() {
+    if Instant::now().checked_add(process).is_none() {
         return Err(ConfigError::IntervalTooLarge);
     }
 
