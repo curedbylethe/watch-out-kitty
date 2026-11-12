@@ -181,7 +181,7 @@ pub fn assess(
             let program = scan.get(ancestor)?.program.as_ref()?;
             TERMINAL_PROGRAMS
                 .iter()
-                .any(|known| program.eq_ignore_ascii_case(known))
+                .any(|known| program.trim_start_matches('-').eq_ignore_ascii_case(known))
                 .then(|| TerminalAssociation::Observed {
                     identity: *ancestor,
                     program: program.clone(),
@@ -381,6 +381,17 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    #[test]
+    fn login_shell_with_leading_dash_is_terminal_evidence() {
+        let rows = vec![
+            provenance(1, 1, resolved(2, 1), None, Some(501)),
+            provenance(2, 1, ParentContext::NoParent, Some("-zsh"), Some(501)),
+        ];
+        let result = assess((1, 1), &scan(rows), None);
+        assert_eq!(result.state, EligibilityState::Protected);
+        assert!(result.reasons.contains(&EligibilityReason::ActiveTerminal));
     }
 
     #[test]
