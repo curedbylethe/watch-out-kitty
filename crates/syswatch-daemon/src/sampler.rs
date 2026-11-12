@@ -126,4 +126,19 @@ mod tests {
         assert_eq!(sampler.history().len(), len);
         sampler.refresh_processes();
     }
+
+    #[test]
+    fn ready_window_publishes_suggestions_stamped_with_the_scan_time() {
+        let mut sampler = LiveSampler::new().unwrap();
+        sampler.detector_config = DetectorConfig {
+            min_valid_observations: 1,
+            min_span_ms: 0,
+            ..DetectorConfig::default()
+        };
+        sampler.refresh_processes();
+        let scan = sampler.refresh_processes();
+        let suggestions = scan.suggestions.expect("second scan is ready");
+        assert_eq!(suggestions.evaluated_at_ms, scan.observed_at_ms);
+        assert_eq!(suggestions.processes_updated_at_ms, scan.observed_at_ms);
+    }
 }
