@@ -7,6 +7,22 @@ use std::thread;
 use syswatch_core::protocol::RequestCommand;
 
 #[test]
+fn suggestions_are_unavailable_until_enough_history_is_collected() {
+    let dir = TempDir::new();
+    let daemon = Daemon::start(&dir);
+    let line = poll(&daemon, RequestCommand::Suggestions, |line| {
+        line.contains("\"kind\":\"error\"")
+    });
+    assert!(line.contains("\"code\":\"unavailable\""));
+    assert!(
+        line.contains(
+            "suggestions are not available until enough process history has been collected"
+        )
+    );
+    assert!(!line.contains("no snapshot has been collected yet"));
+}
+
+#[test]
 fn status_response_carries_the_aggregate_and_freshness() {
     let dir = TempDir::new();
     let daemon = Daemon::start(&dir);
