@@ -236,17 +236,20 @@ impl Drop for Daemon {
 
 pub fn cli_binary() -> PathBuf {
     let path = std::env::current_exe().expect("current test executable");
-    let binary = path
-        .parent()
-        .and_then(Path::parent)
-        .expect("test executable under target/debug/deps")
-        .join("syswatch");
+    let binary = find_cli_binary(&path);
     assert!(
-        binary.is_file(),
-        "syswatch binary missing at {}; run cargo build --workspace",
-        binary.display()
+        binary.is_some(),
+        "syswatch binary missing above {}; run cargo build --workspace",
+        path.display()
     );
-    binary
+    binary.unwrap()
+}
+
+fn find_cli_binary(path: &Path) -> Option<PathBuf> {
+    path.ancestors().find_map(|dir| {
+        let binary = dir.join("syswatch");
+        binary.is_file().then_some(binary)
+    })
 }
 
 pub fn stale_socket(path: &Path) {
@@ -287,5 +290,25 @@ pub fn wait_for_exit(mut child: Child, deadline: Duration) -> Output {
             );
         }
         thread::sleep(POLL);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TempDir, find_cli_binary};
+    use std::fs;
+
+    #[test]
+    fn finds_cli_binary_above_build_script_test_layout() {
+        let dir = TempDir::new();
+        let test_executable = dir
+            .path()
+            .join("target/debug/build/syswatch-daemon/hash/out/cli-test");
+        fs::create_dir_all(test_executable.parent().unwrap()).unwrap();
+        let binary = dir.path().join("target/debug/syswatch");
+        fs::create_dir_all(binary.parent().unwrap()).unwrap();
+        fs::write(&binary, b"").unwrap();
+
+        assert_eq!(find_cli_binary(&test_executable), Some(binary));
     }
 }
