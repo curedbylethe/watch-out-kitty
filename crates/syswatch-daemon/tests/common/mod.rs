@@ -224,7 +224,7 @@ pub fn cli_binary() -> PathBuf {
         .join("syswatch");
     assert!(
         binary.is_file(),
-        "syswatch binary missing at {}; run cargo test --workspace",
+        "syswatch binary missing at {}; run cargo build --workspace",
         binary.display()
     );
     binary
