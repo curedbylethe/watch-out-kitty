@@ -1,7 +1,12 @@
 //! History-only candidates are not findings or eligibility decisions.
 //! They do not establish that a process is idle, abandoned, or safe to terminate.
 
+use std::collections::BTreeMap;
+
+use crate::eligibility::{self, EligibilityState};
+use crate::findings::{self, AdvisoryFinding, Confidence, FindingEvidence, FindingId, FindingKind};
 use crate::history::ProcessHistory;
+use crate::provenance::ProcessProvenance;
 
 /// Default minimum memory, in bytes (256 MiB).
 pub const DEFAULT_MIN_MEMORY_BYTES: u64 = 268_435_456;
@@ -76,13 +81,13 @@ pub fn idle_memory_candidates(
             .iter()
             .filter(|o| o.timestamp_ms <= now_ms)
             .collect();
-        let Some(latest_memory) = observations
-            .iter()
-            .max_by_key(|o| o.timestamp_ms)
-            .map(|o| o.memory_bytes)
-        else {
+        let Some(latest) = observations.iter().max_by_key(|o| o.timestamp_ms) else {
             continue;
         };
+        if now_ms.saturating_sub(latest.timestamp_ms) > config.max_staleness_ms {
+            continue;
+        }
+        let latest_memory = latest.memory_bytes;
         let mut idle = Vec::new();
         let mut busy = false;
         for observation in observations {
@@ -122,6 +127,57 @@ pub fn idle_memory_candidates(
         });
     }
     candidates
+}
+
+/// Returns advisory findings for eligible possible idle memory consumers.
+pub fn detect_idle_memory_consumers(
+    history: &ProcessHistory,
+    now_ms: u64,
+    provenance: &BTreeMap<(u32, u64), ProcessProvenance>,
+    config: &DetectorConfig,
+) -> Vec<AdvisoryFinding> {
+    let monitor = eligibility::monitor_identity(provenance);
+    let mut findings = Vec::new();
+    for candidate in idle_memory_candidates(history, now_ms, config) {
+        if eligibility::assess(candidate.identity, provenance, monitor).state
+            != EligibilityState::Eligible
+        {
+            continue;
+        }
+        let Some(record) = history.get(candidate.identity) else {
+            continue;
+        };
+        let evidence = FindingEvidence::from_record(record);
+        let confidence = if evidence
+            .cpu
+            .as_ref()
+            .is_some_and(|cpu| cpu.valid_samples == evidence.sample_count)
+        {
+            Confidence::High
+        } else {
+            Confidence::Medium
+        };
+        findings.push(AdvisoryFinding {
+            id: FindingId {
+                pid: candidate.identity.0,
+                start_time_secs: candidate.identity.1,
+                kind: FindingKind::Memory,
+            },
+            confidence,
+            observed_at_ms: candidate.observed_at_ms,
+            explanation: format!(
+                "pid {} held {} MiB of memory while using at most {:.1}% CPU across {} samples over {} s; review this process",
+                candidate.identity.0,
+                candidate.latest_memory_bytes / 1_048_576,
+                candidate.max_idle_cpu_percent,
+                candidate.valid_samples,
+                candidate.span_ms / 1000,
+            ),
+            evidence,
+        });
+    }
+    findings::sort(&mut findings);
+    findings
 }
 
 #[cfg(test)]
@@ -241,6 +297,13 @@ mod tests {
         assert!(candidates(&h, 120_000).is_empty());
     }
     #[test]
+    fn future_scan_cannot_make_old_supporting_observations_fresh() {
+        let mut h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        h.record_scan(200_000, &[process(0.0, DEFAULT_MIN_MEMORY_BYTES)]);
+        assert!(candidates(&h, 160_002).is_empty());
+    }
+
+    #[test]
     fn non_monotonic_history_is_evaluated_by_timestamp() {
         let mut s = samples(0.0, DEFAULT_MIN_MEMORY_BYTES);
         s.swap(2, 6);
@@ -267,5 +330,223 @@ mod tests {
     fn repeated_evaluation_is_deterministic() {
         let h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
         assert_eq!(candidates(&h, 120_001), candidates(&h, 120_001));
+    }
+    use crate::history::HistoryLimits;
+    use crate::provenance::ParentContext;
+
+    fn provenance(
+        pid: u32,
+        start: u64,
+        owner: Option<u32>,
+        parent: ParentContext,
+        program: &str,
+    ) -> ProcessProvenance {
+        ProcessProvenance {
+            pid,
+            start_time_secs: start,
+            executable: None,
+            program: Some(program.into()),
+            owner_uid: owner,
+            parent,
+        }
+    }
+
+    fn scan(rows: Vec<ProcessProvenance>) -> BTreeMap<(u32, u64), ProcessProvenance> {
+        rows.into_iter().map(|row| (row.identity(), row)).collect()
+    }
+
+    fn eligible(pid: u32, start: u64) -> ProcessProvenance {
+        provenance(pid, start, Some(501), ParentContext::NoParent, "worker")
+    }
+
+    fn detect(
+        h: &ProcessHistory,
+        rows: &BTreeMap<(u32, u64), ProcessProvenance>,
+    ) -> Vec<AdvisoryFinding> {
+        detect_idle_memory_consumers(h, 120_001, rows, &DetectorConfig::default())
+    }
+
+    #[test]
+    fn eligible_idle_consumer_yields_one_finding() {
+        let h = history(&samples(0.8, DEFAULT_MIN_MEMORY_BYTES));
+        let rows = scan(vec![eligible(42, 1)]);
+        let result = detect(&h, &rows);
+        assert_eq!(result.len(), 1);
+        let finding = &result[0];
+        assert_eq!(finding.id.identity(), (42, 1));
+        assert_eq!(finding.id.kind, FindingKind::Memory);
+        assert_eq!(finding.observed_at_ms, 120_001);
+        assert_eq!(
+            finding.explanation,
+            "pid 42 held 256 MiB of memory while using at most 0.8% CPU across 6 samples over 120 s; review this process"
+        );
+        assert_eq!(finding.evidence.sample_count, 7);
+        assert_eq!(finding.evidence.span_ms, 120_001);
+    }
+
+    #[test]
+    fn protected_owner_is_excluded() {
+        let h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        for uid in [0, 499] {
+            let rows = scan(vec![provenance(
+                42,
+                1,
+                Some(uid),
+                ParentContext::NoParent,
+                "worker",
+            )]);
+            assert!(detect(&h, &rows).is_empty());
+        }
+    }
+
+    #[test]
+    fn missing_provenance_is_excluded() {
+        let h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        assert!(detect(&h, &BTreeMap::new()).is_empty());
+    }
+
+    #[test]
+    fn monitor_process_is_excluded() {
+        let pid = std::process::id();
+        let mut h = ProcessHistory::new();
+        for (time, cpu, memory) in samples(0.0, DEFAULT_MIN_MEMORY_BYTES) {
+            let mut p = process(cpu, memory);
+            p.pid = pid;
+            h.record_scan(time, &[p]);
+        }
+        assert!(detect(&h, &scan(vec![eligible(pid, 1)])).is_empty());
+    }
+
+    #[test]
+    fn active_terminal_chain_is_excluded() {
+        let h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        let rows = scan(vec![
+            provenance(
+                42,
+                1,
+                Some(501),
+                ParentContext::Resolved {
+                    pid: 50,
+                    start_time_secs: 1,
+                },
+                "worker",
+            ),
+            provenance(50, 1, Some(501), ParentContext::NoParent, "zsh"),
+        ]);
+        assert!(detect(&h, &rows).is_empty());
+    }
+
+    #[test]
+    fn unknown_ancestry_is_excluded() {
+        let h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        let rows = scan(vec![provenance(
+            42,
+            1,
+            Some(501),
+            ParentContext::PidOnly(50),
+            "worker",
+        )]);
+        assert!(detect(&h, &rows).is_empty());
+    }
+
+    #[test]
+    fn pid_reuse_does_not_inherit_a_finding() {
+        let mut h = ProcessHistory::new();
+        for (time, cpu, memory) in samples(0.0, DEFAULT_MIN_MEMORY_BYTES) {
+            let mut p = process(cpu, memory);
+            p.start_time_secs = 1000;
+            h.record_scan(time, &[p]);
+        }
+        let old = detect(&h, &scan(vec![eligible(42, 1000)]));
+        assert_eq!(old[0].id.start_time_secs, 1000);
+        let mut p = process(12.5, DEFAULT_MIN_MEMORY_BYTES);
+        p.start_time_secs = 2000;
+        h.record_scan(120_002, &[p.clone()]);
+        h.record_scan(120_003, &[p]);
+        let new = detect_idle_memory_consumers(
+            &h,
+            120_003,
+            &scan(vec![eligible(42, 2000)]),
+            &DetectorConfig::default(),
+        );
+        assert!(new.is_empty());
+        assert_ne!(
+            old[0].id,
+            FindingId {
+                pid: 42,
+                start_time_secs: 2000,
+                kind: FindingKind::Memory
+            }
+        );
+    }
+
+    #[test]
+    fn high_memory_active_process_yields_no_finding() {
+        let mut s = samples(0.0, DEFAULT_MIN_MEMORY_BYTES + 1);
+        s[3].1 = 12.5;
+        assert!(detect(&history(&s), &scan(vec![eligible(42, 1)])).is_empty());
+    }
+
+    #[test]
+    fn confidence_is_medium_with_a_warm_up_sample_and_high_when_all_are_valid() {
+        let h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        let rows = scan(vec![eligible(42, 1)]);
+        assert_eq!(detect(&h, &rows)[0].confidence, Confidence::Medium);
+        let mut h = ProcessHistory::with_limits(HistoryLimits {
+            max_observations_per_process: 6,
+            ..Default::default()
+        });
+        for i in 0..7 {
+            h.record_scan(i * 24_000, &[process(0.0, DEFAULT_MIN_MEMORY_BYTES)]);
+        }
+        assert_eq!(
+            detect_idle_memory_consumers(&h, 144_000, &rows, &DetectorConfig::default())[0]
+                .confidence,
+            Confidence::High
+        );
+    }
+
+    #[test]
+    fn explanation_never_claims_safety() {
+        let h = history(&samples(0.8, DEFAULT_MIN_MEMORY_BYTES));
+        let finding = &detect(&h, &scan(vec![eligible(42, 1)]))[0];
+        assert!(finding.explanation.contains("review this process"));
+        for word in ["safe", "stale", "orphan", "kill"] {
+            assert!(!finding.explanation.contains(word));
+        }
+        assert!(finding.explanation.contains("256 MiB"));
+        assert!(
+            finding
+                .explanation
+                .contains("0.8% CPU across 6 samples over 120 s")
+        );
+    }
+
+    #[test]
+    fn findings_are_ordered_by_identity() {
+        let mut h = ProcessHistory::new();
+        for (time, cpu, memory) in samples(0.0, DEFAULT_MIN_MEMORY_BYTES) {
+            let p = process(cpu, memory);
+            let mut other = p.clone();
+            other.pid = 43;
+            h.record_scan(time, &[other, p]);
+        }
+        let result = detect(&h, &scan(vec![eligible(43, 1), eligible(42, 1)]));
+        assert_eq!(
+            result.iter().map(|f| f.id.pid).collect::<Vec<_>>(),
+            [42, 43]
+        );
+    }
+
+    #[test]
+    fn findings_repeated_evaluation_is_deterministic() {
+        let h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        let rows = scan(vec![eligible(42, 1)]);
+        assert_eq!(detect(&h, &rows), detect(&h, &rows));
+    }
+
+    #[test]
+    fn empty_history_yields_no_findings() {
+        assert!(detect(&ProcessHistory::new(), &scan(vec![eligible(42, 1)])).is_empty());
     }
 }
