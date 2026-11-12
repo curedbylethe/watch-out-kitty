@@ -42,9 +42,9 @@ request line per connection; the server closes the connection after its reply.
 
 This repository contains the telemetry crate, snapshot example, foreground
 daemon, and `syswatch status` and `syswatch top` commands; it does not yet
-display an indicator in Kitty. A background service and advisory process
-recommendations are planned. The core library defines an advisory finding
-model, but no detector or command produces findings yet. See the
+display an indicator in Kitty. A background service and a command that surfaces
+advisory findings are planned. The core library has a pure advisory detector,
+but no daemon, command, or protocol reply produces findings yet. See the
 [issue tracker](https://github.com/curedbylethe/watch-out-kitty/issues) for
 planned work and [issue #13](https://github.com/curedbylethe/watch-out-kitty/issues/13)
 for contributor guidance.
@@ -70,6 +70,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-core/src/collector.rs` | System sampling |
 | `crates/syswatch-core/src/provenance.rs` | Internal process provenance metadata |
 | `crates/syswatch-core/src/config.rs` | Validated monitoring intervals |
+| `crates/syswatch-core/src/detector.rs` | Advisory idle memory detector |
 | `crates/syswatch-core/src/findings.rs` | Advisory finding model and evidence |
 | `crates/syswatch-core/src/eligibility.rs` | Protected-process and ancestry eligibility |
 | `crates/syswatch-core/src/history.rs` | Bounded process observation history |
@@ -133,8 +134,17 @@ observation has a valid measurement and at least two observations are retained.
 Confidence does not say whether a process is stale, safe, or safe to terminate.
 A finding invites inspection.
 
-No detector or command produces findings yet. The daemon does not produce them,
-and the CLI does not show them.
+The detector considers eligible processes holding at least 256 MiB, with CPU
+usage at or below 1.0% across at least six valid samples spanning at least
+120 seconds. The latest supporting observation must be no more than 30 seconds
+old. At the default 5-second interval, the 60-observation cap permits about
+295 seconds of retained evidence. The detector reports the observed span.
+Warm-up and invalid CPU samples do not count; genuine zero readings can still
+be cold, so this evidence does not prove idleness. Explanations omit process
+names; any renderer adding them must sanitize them as `report.rs` does. Findings
+do not claim a process is safe or safe to terminate. The detector does not
+detect orphaned, stale, or abandoned processes and performs no process control.
+The daemon, IPC, protocol, CLI, and Kitty rendering do not expose findings.
 
 ### Advisory eligibility
 
