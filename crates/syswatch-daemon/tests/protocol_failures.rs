@@ -63,6 +63,47 @@ fn unsupported_protocol_version_is_reported() {
 }
 
 #[test]
+fn suggestions_version_mismatch_is_reported() {
+    let dir = TempDir::new();
+    let daemon = Daemon::start(&dir);
+    let response = request(
+        daemon.socket(),
+        "{\"version\":2,\"command\":\"suggestions\"}\n",
+    )
+    .unwrap();
+    assert!(response.contains("\"code\":\"unsupported_version\""));
+    assert!(response.contains("unsupported protocol version 2; this server speaks 1"));
+}
+
+#[test]
+fn suggestions_silent_disconnect_is_ignored() {
+    let dir = TempDir::new();
+    let daemon = Daemon::start(&dir);
+    drop(UnixStream::connect(daemon.socket()).unwrap());
+    assert!(
+        request(daemon.socket(), &request_line(RequestCommand::Status))
+            .unwrap()
+            .contains("\"kind\":")
+    );
+}
+
+#[test]
+fn suggestions_partial_line_disconnect_is_ignored() {
+    let dir = TempDir::new();
+    let daemon = Daemon::start(&dir);
+    let mut stream = UnixStream::connect(daemon.socket()).unwrap();
+    stream
+        .write_all(b"{\"version\":1,\"command\":\"suggestions\"")
+        .unwrap();
+    drop(stream);
+    assert!(
+        request(daemon.socket(), &request_line(RequestCommand::Status))
+            .unwrap()
+            .contains("\"kind\":")
+    );
+}
+
+#[test]
 fn unknown_command_is_rejected() {
     let dir = TempDir::new();
     let daemon = Daemon::start(&dir);
