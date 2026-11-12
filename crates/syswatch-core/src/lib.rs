@@ -2,6 +2,7 @@
 
 pub mod collector;
 pub mod config;
+pub mod findings;
 pub mod history;
 #[cfg(unix)]
 pub mod ipc;
@@ -10,6 +11,7 @@ pub mod report;
 pub mod snapshot;
 pub use collector::Collector;
 pub use config::{ConfigError, MonitoringConfig};
+pub use findings::{AdvisoryFinding, Confidence, FindingId, FindingKind};
 pub use history::{HistoryLimits, ProcessHistory, ProcessObservation, ProcessRecord};
 pub use snapshot::{AggregateSnapshot, MemorySnapshot, ProcessSnapshot, SystemSnapshot};
 
