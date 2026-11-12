@@ -108,10 +108,6 @@ pub fn field_is_null(line: &str, key: &str) -> bool {
     line.contains(&format!("\"{key}\":null"))
 }
 
-pub fn line_contains(line: &str, needle: &str) -> bool {
-    line.contains(needle)
-}
-
 pub fn wait_until(timeout: Duration, mut predicate: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + timeout;
     loop {

@@ -2,10 +2,7 @@
 
 mod common;
 
-use common::{
-    Daemon, TempDir, field_f64, field_is_null, field_u64, line_contains, poll, request,
-    request_line,
-};
+use common::{Daemon, TempDir, field_f64, field_is_null, field_u64, poll, request, request_line};
 use std::thread;
 use syswatch_core::protocol::RequestCommand;
 
@@ -16,7 +13,7 @@ fn status_response_carries_the_aggregate_and_freshness() {
     let line = poll(&daemon, RequestCommand::Status, |line| {
         line.contains("\"kind\":\"status\"")
     });
-    assert!(line_contains(&line, "\"version\":1"));
+    assert!(line.contains("\"version\":1"));
     assert!(field_u64(&line, "timestamp_ms").is_some());
     let cpu = field_f64(&line, "cpu_usage_percent").unwrap();
     assert!(cpu.is_finite() && (0.0..=100.0).contains(&cpu));
