@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    ffi::{OsStr, OsString},
+    ffi::OsStr,
     path::{Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
@@ -81,9 +81,9 @@ impl Collector {
             ProcessRefreshKind::nothing()
                 .with_cpu()
                 .with_memory()
-                .with_user(UpdateKind::OnlyIfNotSet)
-                .with_exe(UpdateKind::OnlyIfNotSet)
-                .with_cmd(UpdateKind::OnlyIfNotSet)
+                .with_user(UpdateKind::Always)
+                .with_exe(UpdateKind::Always)
+                .with_cmd(UpdateKind::Always)
                 .without_tasks(),
         );
         #[cfg(test)]
@@ -111,7 +111,9 @@ impl Collector {
                         pid,
                         start_time_secs,
                         executable: process.exe().map(Path::to_path_buf),
-                        cmd: process.cmd().to_vec(),
+                        program: crate::provenance::program_label(
+                            process.cmd().first().map(|arg| arg.as_os_str()),
+                        ),
                         owner_uid: process.user_id().map(|uid| **uid),
                         parent_pid: process.parent().map(Pid::as_u32),
                     },
@@ -174,7 +176,7 @@ struct RawProvenance {
     pid: u32,
     start_time_secs: u64,
     executable: Option<PathBuf>,
-    cmd: Vec<OsString>,
+    program: Option<String>,
     owner_uid: Option<u32>,
     parent_pid: Option<u32>,
 }
@@ -201,7 +203,7 @@ fn build_provenance(rows: Vec<RawProvenance>) -> BTreeMap<(u32, u64), ProcessPro
                 pid: row.pid,
                 start_time_secs: row.start_time_secs,
                 executable: row.executable,
-                program: crate::provenance::program_label(row.cmd.first().map(OsString::as_os_str)),
+                program: row.program,
                 owner_uid: row.owner_uid,
                 parent,
             };
@@ -281,7 +283,7 @@ mod tests {
             pid,
             start_time_secs,
             executable: None,
-            cmd: cmd.iter().map(Into::into).collect(),
+            program: crate::provenance::program_label(cmd.first().map(OsStr::new)),
             owner_uid: None,
             parent_pid,
         }
@@ -625,6 +627,61 @@ mod tests {
                 .refresh_processes()
                 .iter()
                 .any(|process| process.pid == pid)
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn provenance_refreshes_metadata_after_exec_with_same_identity() {
+        let mut collector = Collector::new().unwrap();
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "sleep 1; exec /bin/sleep 30"])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut initial = None;
+        while Instant::now() < deadline {
+            collector.refresh_processes();
+            initial = collector
+                .provenance()
+                .values()
+                .find(|provenance| provenance.pid == pid)
+                .cloned();
+            if initial.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        let mut refreshed = None;
+        if let Some(initial) = &initial {
+            while Instant::now() < deadline {
+                collector.refresh_processes();
+                if let Some(provenance) = collector.provenance_for(initial.identity())
+                    && provenance.program.as_deref() == Some("sleep")
+                {
+                    refreshed = Some(provenance.clone());
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+
+        child.kill().unwrap();
+        child.wait().unwrap();
+
+        let initial = initial.expect("child process not observed");
+        let refreshed = refreshed.expect("exec metadata not refreshed");
+        assert_ne!(initial.program.as_deref(), Some("sleep"));
+        assert_eq!(refreshed.identity(), initial.identity());
+        assert_eq!(
+            refreshed
+                .executable
+                .as_deref()
+                .and_then(std::path::Path::file_name),
+            Some(OsStr::new("sleep"))
         );
     }
 }
