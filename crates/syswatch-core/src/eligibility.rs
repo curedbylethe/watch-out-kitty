@@ -488,10 +488,10 @@ mod tests {
     #[test]
     fn parent_pid_one_reaching_root_is_eligible_not_abandoned() {
         let rows = vec![
-            provenance(1, 1, resolved(2, 1), None, Some(501)),
-            provenance(2, 1, ParentContext::NoParent, None, Some(501)),
+            provenance(2, 1, resolved(1, 1), None, Some(501)),
+            provenance(1, 1, ParentContext::NoParent, None, Some(501)),
         ];
-        let result = assess((1, 1), &scan(rows), None);
+        let result = assess((2, 1), &scan(rows), None);
         assert_eq!(result.state, EligibilityState::Eligible);
     }
 
