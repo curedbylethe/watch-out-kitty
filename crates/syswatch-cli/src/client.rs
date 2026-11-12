@@ -140,6 +140,7 @@ pub fn request(
     let version = match &response {
         Response::Status { version, .. }
         | Response::Processes { version, .. }
+        | Response::Suggestions { version, .. }
         | Response::Error { version, .. } => *version,
     };
     if version != protocol::PROTOCOL_VERSION {
