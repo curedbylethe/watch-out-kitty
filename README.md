@@ -41,10 +41,11 @@ request line per connection; the server closes the connection after its reply.
 ## Current scope
 
 This repository contains the telemetry crate, snapshot example, foreground
-daemon, and `syswatch status` and `syswatch top` commands; it does not yet
-display an indicator in Kitty. A background service and a command that surfaces
-advisory findings are planned. The core library has a pure advisory detector,
-but no daemon, command, or protocol reply produces findings yet. See the
+daemon, and `syswatch status` and `syswatch top` commands. The daemon evaluates
+advisory findings on process-sampling ticks, caches them separately from
+aggregate telemetry, and serves them through the read-only `suggestions`
+request. No CLI command or Kitty indicator shows them yet. A background service
+and a command that surfaces advisory findings are planned. See the
 [issue tracker](https://github.com/curedbylethe/watch-out-kitty/issues) for
 planned work and [issue #13](https://github.com/curedbylethe/watch-out-kitty/issues/13)
 for contributor guidance.
@@ -71,7 +72,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-core/src/provenance.rs` | Internal process provenance metadata |
 | `crates/syswatch-core/src/config.rs` | Validated monitoring intervals |
 | `crates/syswatch-core/src/detector.rs` | Advisory idle memory detector |
-| `crates/syswatch-core/src/findings.rs` | Advisory finding model and evidence |
+| `crates/syswatch-core/src/findings.rs` | Advisory findings, evidence, and cached suggestions payload |
 | `crates/syswatch-core/src/eligibility.rs` | Protected-process and ancestry eligibility |
 | `crates/syswatch-core/src/history.rs` | Bounded process observation history |
 | `crates/syswatch-core/src/ipc.rs` | Daemon socket path resolution |
@@ -84,10 +85,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-daemon/src/clock.rs` | Interruptible monotonic clock |
 | `crates/syswatch-daemon/src/ipc.rs` | Unix socket server |
 | `crates/syswatch-daemon/src/scheduler.rs` | Independent sampling schedule |
-| `crates/syswatch-daemon/src/latest.rs` | Cached latest snapshot |
+| `crates/syswatch-daemon/src/latest.rs` | Cached latest snapshot and advisory suggestions |
 | `crates/syswatch-daemon/src/lib.rs` | Daemon lifecycle and server startup |
 | `crates/syswatch-daemon/src/main.rs` | Foreground daemon entry point |
-| `crates/syswatch-daemon/src/sampler.rs` | Collector and process-history owner |
+| `crates/syswatch-daemon/src/sampler.rs` | Collector, process history, and advisory evaluation |
 | `crates/syswatch-daemon/src/signals.rs` | SIGINT and SIGTERM handling |
 | `crates/syswatch-daemon/tests` | End-to-end daemon and socket tests |
 | `crates/syswatch-cli` | Status and process-ranking command-line client |
@@ -144,7 +145,10 @@ be cold, so this evidence does not prove idleness. Explanations omit process
 names; any renderer adding them must sanitize them as `report.rs` does. Findings
 do not claim a process is safe or safe to terminate. The detector does not
 detect orphaned, stale, or abandoned processes and performs no process control.
-The daemon, IPC, protocol, CLI, and Kitty rendering do not expose findings.
+The daemon evaluates findings on process-sampling ticks and serves the cached
+result over IPC without recomputing it per request. The CLI and Kitty rendering
+do not show findings yet. A finding describes observed evidence and never
+authorizes a process action.
 
 ### Advisory eligibility
 
@@ -166,19 +170,30 @@ CR is rejected.
 Protocol version is `1`. Clients send the version they speak. The server reports
 `unsupported_version` with both version numbers when they differ. Changes to
 required fields, field meanings, or command behavior require a version bump.
+The `suggestions` operation is additive, so the version remains `1`: existing
+fields and command behavior are unchanged, older servers reply
+`unsupported_command`, and older clients never send the request.
 
-The two read-only requests and example replies:
+The three read-only requests and example replies:
 
 ```text
 {"version":1,"command":"status"}
 {"version":1,"command":"processes"}
+{"version":1,"command":"suggestions"}
 {"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":42.5,"cpu_updated_at_ms":1700000000123,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":2,"processes_updated_at_ms":1700000000100}
 {"kind":"processes","version":1,"observed_at_ms":1700000000123,"processes_updated_at_ms":1700000000100,"processes":[{"pid":42,"parent_pid":1,"name":"worker","cpu_usage_percent":12.5,"memory_bytes":4096,"start_time_secs":1700000000}]}
+{"kind":"suggestions","version":1,"evaluated_at_ms":7,"processes_updated_at_ms":6,"findings":[]}
 {"kind":"error","version":1,"code":"unsupported_version","message":"unsupported protocol version 2; this server speaks 1"}
 {"kind":"error","version":1,"code":"unsupported_command","message":"unsupported command \"kill\""}
 {"kind":"error","version":1,"code":"malformed_request","message":"request is not a JSON object with integer version and string command"}
 {"kind":"error","version":1,"code":"unavailable","message":"process data has not been collected yet"}
+{"kind":"error","version":1,"code":"unavailable","message":"suggestions are not available until enough process history has been collected"}
 ```
+
+Suggestions contain at most 64 findings, sorted by finding identity and then
+observation time. The existing per-user socket permissions apply. A suggestions
+reply contains a list, possibly empty when nothing qualified, or an unavailable
+error before enough history is collected; `findings` is never `null`.
 
 `cpu_updated_at_ms`, `process_count`, and `processes_updated_at_ms` can be
 `null` during warm-up. For example:
@@ -192,11 +207,13 @@ The two read-only requests and example replies:
 | `unsupported_version` | Requested protocol version is not supported. |
 | `unsupported_command` | Request names an unsupported command. |
 | `malformed_request` | Request line is malformed or too large. |
-| `unavailable` | Process data has not been collected yet. |
+| `unavailable` | Requested data has not been collected yet. |
 
 The protocol has no filesystem paths, process-control operations, authentication,
-remote access, history, or write requests. Types live in
-`syswatch_core::protocol`.
+remote access, history request, retained-observation payload, or write requests.
+A suggestions reply carries finding identity, confidence, timestamps,
+explanation, and aggregate numeric evidence; it contains no process names,
+paths, argv, or environment data. Types live in `syswatch_core::protocol`.
 
 `syswatch status` shows `warming up` before the first CPU sample and `not yet
 sampled` before the first process scan. Displayed ages use the sample times.
