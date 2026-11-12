@@ -53,6 +53,13 @@ pub fn request(
     stream.set_write_timeout(Some(timeout)).map_err(|error| {
         ClientError::Write(format!("cannot configure daemon connection: {error}"))
     })?;
+    let read_interval = timeout.min(Duration::from_millis(10));
+    if read_interval.is_zero() {
+        return Err(timeout_error(timeout, path));
+    }
+    stream
+        .set_read_timeout(Some(read_interval))
+        .map_err(|error| ClientError::Read(format!("cannot set daemon read timeout: {error}")))?;
 
     let mut request = protocol::encode_line(&Request {
         version: protocol::PROTOCOL_VERSION,
@@ -70,13 +77,6 @@ pub fn request(
     })?;
 
     let deadline = Instant::now() + timeout;
-    let read_interval = timeout.min(Duration::from_millis(10));
-    if read_interval.is_zero() {
-        return Err(timeout_error(timeout, path));
-    }
-    stream
-        .set_read_timeout(Some(read_interval))
-        .map_err(|error| ClientError::Read(format!("cannot set daemon read timeout: {error}")))?;
     let mut bytes = Vec::new();
     let mut chunk = [0; 8192];
     while bytes.len() <= MAX_RESPONSE_BYTES {
