@@ -110,6 +110,9 @@ pub fn idle_memory_candidates(
             continue;
         }
         idle.sort_by_key(|sample| sample.0);
+        if now_ms.saturating_sub(idle.last().unwrap().0) > config.max_staleness_ms {
+            continue;
+        }
         let span_ms = idle.last().unwrap().0.saturating_sub(idle[0].0);
         if span_ms < config.min_span_ms {
             continue;
@@ -283,6 +286,14 @@ mod tests {
     fn outdated_observations_are_rejected() {
         let h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
         assert_eq!(candidates(&h, 150_001).len(), 1);
+        assert!(candidates(&h, 150_002).is_empty());
+    }
+    #[test]
+    fn invalid_cpu_samples_do_not_refresh_idle_evidence() {
+        let mut h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        h.record_scan(150_001, &[process(f32::NAN, DEFAULT_MIN_MEMORY_BYTES)]);
+        assert_eq!(candidates(&h, 150_001).len(), 1);
+        h.record_scan(150_002, &[process(f32::NAN, DEFAULT_MIN_MEMORY_BYTES)]);
         assert!(candidates(&h, 150_002).is_empty());
     }
     #[test]
