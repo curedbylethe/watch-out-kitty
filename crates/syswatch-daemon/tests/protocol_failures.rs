@@ -76,10 +76,14 @@ fn suggestions_version_mismatch_is_reported() {
 }
 
 #[test]
-fn suggestions_silent_disconnect_is_ignored() {
+fn suggestions_disconnect_before_reply_is_ignored() {
     let dir = TempDir::new();
     let daemon = Daemon::start(&dir);
-    drop(UnixStream::connect(daemon.socket()).unwrap());
+    let mut stream = UnixStream::connect(daemon.socket()).unwrap();
+    stream
+        .write_all(request_line(RequestCommand::Suggestions).as_bytes())
+        .unwrap();
+    drop(stream);
     assert!(
         request(daemon.socket(), &request_line(RequestCommand::Status))
             .unwrap()
