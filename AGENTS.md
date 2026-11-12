@@ -40,6 +40,12 @@ requires an interval between refreshes. Per-process CPU can exceed 100% when a
 process uses multiple cores. Process identity is `(pid, start_time_secs)`;
 operating systems reuse PIDs. Process names use lossy decoding and may contain
 replacement characters.
+Process provenance is collector advisory metadata keyed by `(pid, start_time_secs)`;
+`None` means denied or unavailable. Only the capped file name of `argv[0]` is
+retained in provenance; full arguments are not exposed or serialized through
+snapshots or IPC. Environment variables are not collected. Provenance is not
+serialized. A parent relationship is trustworthy only when the parent's start
+time comes from the same scan.
 
 ## Process lifecycle policy
 

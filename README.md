@@ -68,6 +68,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | --- | --- |
 | `crates/syswatch-core` | Telemetry library |
 | `crates/syswatch-core/src/collector.rs` | System sampling |
+| `crates/syswatch-core/src/provenance.rs` | Internal process provenance metadata |
 | `crates/syswatch-core/src/config.rs` | Validated monitoring intervals |
 | `crates/syswatch-core/src/findings.rs` | Advisory finding model and evidence |
 | `crates/syswatch-core/src/history.rs` | Bounded process observation history |
@@ -109,6 +110,13 @@ age line under the table (for example, `process data: 4.2 s old`) shows its age;
 before the first scan it prints `process data: unavailable`. Per-process CPU
 can exceed 100%; nonfinite CPU values render as `n/a`. Rows sort by the selected
 key, then by PID and start time.
+
+The collector retains best-effort process provenance keyed by process identity:
+executable path, capped file name of `argv[0]`, numeric owner UID, and parent
+identity. Only the capped `argv[0]` file name is copied into provenance; full
+arguments are not exposed or serialized through snapshots or IPC. Environment
+variables are not collected. Provenance is not part of `ProcessSnapshot` or the
+`processes` response.
 
 ### Advisory findings
 
