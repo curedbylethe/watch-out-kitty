@@ -448,6 +448,21 @@ mod tests {
     }
 
     #[test]
+    fn standalone_terminal_program_is_excluded() {
+        let h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        for label in ["zsh", "bash", "kitty", "tmux"] {
+            let rows = scan(vec![provenance(
+                42,
+                1,
+                Some(501),
+                ParentContext::NoParent,
+                label,
+            )]);
+            assert!(detect(&h, &rows).is_empty(), "{label}");
+        }
+    }
+
+    #[test]
     fn unknown_ancestry_is_excluded() {
         let h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
         let rows = scan(vec![provenance(
