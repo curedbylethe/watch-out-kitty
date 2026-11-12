@@ -2,9 +2,7 @@
 
 mod common;
 
-use common::{
-    CLIENT_TIMEOUT, Daemon, TempDir, line_contains, request, request_line, run_cli, socket_path,
-};
+use common::{CLIENT_TIMEOUT, Daemon, TempDir, request, request_line, run_cli, socket_path};
 use std::{
     io::{BufRead, Write},
     os::unix::net::UnixStream,
@@ -17,8 +15,8 @@ fn malformed_request_is_rejected_and_the_daemon_continues() {
     let daemon = Daemon::start(&dir);
 
     let response = request(daemon.socket(), "not json\n").unwrap();
-    assert!(line_contains(&response, "\"kind\":\"error\""));
-    assert!(line_contains(&response, "\"code\":\"malformed_request\""));
+    assert!(response.contains("\"kind\":\"error\""));
+    assert!(response.contains("\"code\":\"malformed_request\""));
     assert!(
         request(daemon.socket(), &request_line(RequestCommand::Status))
             .unwrap()
@@ -40,8 +38,8 @@ fn oversized_request_is_rejected() {
     std::io::BufReader::new(stream)
         .read_line(&mut response)
         .unwrap();
-    assert!(line_contains(&response, "\"kind\":\"error\""));
-    assert!(line_contains(&response, "\"code\":\"malformed_request\""));
+    assert!(response.contains("\"kind\":\"error\""));
+    assert!(response.contains("\"code\":\"malformed_request\""));
     assert!(
         request(daemon.socket(), &request_line(RequestCommand::Status))
             .unwrap()
@@ -59,7 +57,7 @@ fn unsupported_protocol_version_is_reported() {
         &format!("{{\"version\":{version},\"command\":\"status\"}}\n"),
     )
     .unwrap();
-    assert!(line_contains(&response, "\"code\":\"unsupported_version\""));
+    assert!(response.contains("\"code\":\"unsupported_version\""));
     assert!(response.contains(&version.to_string()));
     assert!(response.contains(&PROTOCOL_VERSION.to_string()));
 }
@@ -73,7 +71,7 @@ fn unknown_command_is_rejected() {
         &format!("{{\"version\":{PROTOCOL_VERSION},\"command\":\"kill\"}}\n"),
     )
     .unwrap();
-    assert!(line_contains(&response, "\"code\":\"unsupported_command\""));
+    assert!(response.contains("\"code\":\"unsupported_command\""));
     assert!(response.contains("unsupported command \\\"kill\\\""));
 }
 
