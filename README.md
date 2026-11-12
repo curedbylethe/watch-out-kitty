@@ -71,6 +71,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-core/src/provenance.rs` | Internal process provenance metadata |
 | `crates/syswatch-core/src/config.rs` | Validated monitoring intervals |
 | `crates/syswatch-core/src/findings.rs` | Advisory finding model and evidence |
+| `crates/syswatch-core/src/eligibility.rs` | Protected-process and ancestry eligibility |
 | `crates/syswatch-core/src/history.rs` | Bounded process observation history |
 | `crates/syswatch-core/src/ipc.rs` | Daemon socket path resolution |
 | `crates/syswatch-core/src/lib.rs` | Public core modules and exports |
@@ -134,6 +135,13 @@ A finding invites inspection.
 
 No detector or command produces findings yet. The daemon does not produce them,
 and the CLI does not show them.
+
+### Advisory eligibility
+
+Eligibility assessment decides whether a later advisory rule may consider a
+process at all. It has exactly three states: `Protected`, `Eligible`, and
+`Unknown`. Unknown terminal association means evidence is missing, not that a
+process is detached.
 
 ## Protocol
 
