@@ -59,6 +59,7 @@ mod tests {
         latest.set_processes(crate::sampler::ProcessScan {
             processes: vec![],
             observed_at_ms: 20,
+            suggestions: None,
         });
         let snapshot = latest.snapshot().unwrap();
         assert_eq!(snapshot.timestamp_ms, 10);
