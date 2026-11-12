@@ -59,6 +59,8 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
+`cargo test --workspace` also runs the end-to-end daemon and socket tests; they spawn isolated daemon processes in temporary directories and require no running daemon.
+
 ## Project files
 
 | Path | Contents |
@@ -82,6 +84,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-daemon/src/main.rs` | Foreground daemon entry point |
 | `crates/syswatch-daemon/src/sampler.rs` | Collector and process-history owner |
 | `crates/syswatch-daemon/src/signals.rs` | SIGINT and SIGTERM handling |
+| `crates/syswatch-daemon/tests` | End-to-end daemon and socket tests |
 | `crates/syswatch-cli` | Status and process-ranking command-line client |
 | `crates/syswatch-cli/src/args.rs` | Command-line argument parsing |
 | `crates/syswatch-cli/src/client.rs` | Daemon IPC client |
