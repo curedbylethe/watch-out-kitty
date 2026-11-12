@@ -26,7 +26,7 @@ fn run() -> Result<(), DaemonError> {
         latest
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .snapshot()
+            .cached()
     }) {
         Ok(server) => server,
         Err(error) => {
