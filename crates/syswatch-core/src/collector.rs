@@ -264,6 +264,8 @@ fn snapshot_at(
 #[cfg(test)]
 mod tests {
     #[cfg(unix)]
+    use std::io::Write;
+    #[cfg(unix)]
     use std::process::Command;
     use std::{
         ffi::OsStr,
@@ -635,7 +637,8 @@ mod tests {
     fn provenance_refreshes_metadata_after_exec_with_same_identity() {
         let mut collector = Collector::new().unwrap();
         let mut child = Command::new("/bin/sh")
-            .args(["-c", "sleep 1; exec /bin/sleep 30"])
+            .args(["-c", "read x; exec /bin/sleep 30"])
+            .stdin(std::process::Stdio::piped())
             .spawn()
             .unwrap();
         let pid = child.id();
@@ -657,6 +660,8 @@ mod tests {
 
         let mut refreshed = None;
         if let Some(initial) = &initial {
+            child.stdin.take().unwrap().write_all(b"\n").unwrap();
+            let deadline = Instant::now() + Duration::from_secs(5);
             while Instant::now() < deadline {
                 collector.refresh_processes();
                 if let Some(provenance) = collector.provenance_for(initial.identity())
