@@ -7,6 +7,7 @@ pub mod history;
 #[cfg(unix)]
 pub mod ipc;
 pub mod protocol;
+pub mod provenance;
 pub mod report;
 pub mod snapshot;
 pub use collector::Collector;
