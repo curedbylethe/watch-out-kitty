@@ -5,11 +5,12 @@
 The Rust 2024 workspace contains `crates/syswatch-core` for telemetry,
 `crates/syswatch-daemon` for foreground sampling, and `crates/syswatch-cli` for status
 and process-ranking output. The core exposes system collection, bounded process
-history, socket path resolution, snapshot data types, and text reporting through
-`src/collector.rs`, `src/history.rs`, `src/ipc.rs`, `src/snapshot.rs`, and
-`src/report.rs`. The CLI modules are `src/args.rs`, `src/client.rs`,
-`src/output.rs`, and `src/main.rs`. The core's `examples/snapshot.rs` prints one
-diagnostic snapshot. See `README.md` for setup and the example.
+history, socket path resolution, snapshot data types, text reporting, and
+advisory findings through `src/collector.rs`, `src/findings.rs`,
+`src/history.rs`, `src/ipc.rs`, `src/snapshot.rs`, and `src/report.rs`. The CLI
+modules are `src/args.rs`, `src/client.rs`, `src/output.rs`, and `src/main.rs`.
+The core's `examples/snapshot.rs` prints one diagnostic snapshot. See `README.md`
+for setup and the example.
 
 ## Architecture boundary
 
@@ -45,7 +46,8 @@ replacement characters.
 The crate does not detect stale processes or terminate processes. Any future
 stale-process detection must use evidence. Parent PID 1 alone does not show
 that a process is abandoned. Process termination requires explicit safeguards
-and confirmation.
+and confirmation. Advisory findings describe observed evidence and never
+authorize a process action.
 
 ## Change discipline
 
