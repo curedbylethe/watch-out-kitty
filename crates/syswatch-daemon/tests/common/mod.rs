@@ -125,6 +125,29 @@ pub fn wait_until(timeout: Duration, mut predicate: impl FnMut() -> bool) -> boo
     }
 }
 
+pub fn poll(
+    daemon: &Daemon,
+    command: RequestCommand,
+    mut matches: impl FnMut(&str) -> bool,
+) -> String {
+    let line = request_line(command);
+    let mut found = None;
+    assert!(
+        wait_until(DAEMON_READY, || {
+            if let Ok(response) = request(daemon.socket(), &line)
+                && matches(&response)
+            {
+                found = Some(response);
+                true
+            } else {
+                false
+            }
+        }),
+        "daemon did not return a matching response"
+    );
+    found.unwrap()
+}
+
 pub fn spawn_daemon(socket: &Path) -> io::Result<Child> {
     Command::new(env!("CARGO_BIN_EXE_syswatch-daemon"))
         .env("SYSWATCH_SOCKET", socket)
