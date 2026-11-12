@@ -2,6 +2,7 @@
 
 pub mod collector;
 pub mod config;
+pub mod detector;
 pub mod eligibility;
 pub mod findings;
 pub mod history;
@@ -13,6 +14,7 @@ pub mod report;
 pub mod snapshot;
 pub use collector::Collector;
 pub use config::{ConfigError, MonitoringConfig};
+pub use detector::{DetectorConfig, IdleMemoryCandidate};
 pub use eligibility::{
     Ancestry, AncestryOutcome, EligibilityAssessment, EligibilityReason, EligibilityState,
     MAX_ANCESTRY_DEPTH, SYSTEM_UID_THRESHOLD, TERMINAL_PROGRAMS, TerminalAssociation,
