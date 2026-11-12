@@ -353,14 +353,12 @@ mod tests {
     }
 
     #[test]
-    fn explanation_is_preserved() {
+    fn explanation_survives_round_trip() {
         let explanation = "pid 42 (worker) used CPU continuously over the retained window";
         let finding = finding(42, 1_700_000_000, FindingKind::Cpu, 1);
         let serialized = serde_json::to_string(&finding).unwrap();
         let deserialized: AdvisoryFinding = serde_json::from_str(&serialized).unwrap();
 
-        assert!(!deserialized.explanation.is_empty());
-        assert!(deserialized.explanation.contains("pid 42"));
         assert_eq!(deserialized.explanation, explanation);
     }
 
