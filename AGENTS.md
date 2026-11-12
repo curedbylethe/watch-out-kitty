@@ -48,6 +48,12 @@ snapshots or IPC. Environment variables are not collected. Provenance is not
 serialized. A parent relationship is trustworthy only when the parent's start
 time comes from the same scan.
 
+The daemon evaluates advisory findings during process sampling and serves the
+most recent cached result through the read-only `suggestions` request. Requests
+never recompute findings. The reply carries finding identity, confidence,
+timestamps, explanation, and aggregate numeric evidence only; it contains no
+process names, paths, argv, or environment data.
+
 ## Process lifecycle policy
 
 The crate does not detect stale processes or terminate processes. Any future
