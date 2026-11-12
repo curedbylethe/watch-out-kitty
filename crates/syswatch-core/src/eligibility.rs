@@ -59,6 +59,8 @@ pub enum EligibilityReason {
     PrivilegedOwner,
     /// The process owner UID falls below [`SYSTEM_UID_THRESHOLD`].
     SystemOwner,
+    /// The assessed process's own program label is a recognized terminal or shell.
+    OwnTerminalProgram,
     /// A validated ancestor has a recognized terminal or shell label.
     ActiveTerminal,
     /// The assessed identity was absent from the scan.
@@ -97,9 +99,11 @@ pub struct Ancestry {
     pub outcome: AncestryOutcome,
 }
 
-/// Positive evidence of a terminal-related ancestor.
+/// Positive terminal evidence from the process itself or a validated ancestor.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TerminalAssociation {
+    /// The assessed process's own program label matched a known program.
+    SelfObserved { program: String },
     /// A validated ancestor matched a known program label.
     Observed {
         identity: (u32, u64),
@@ -174,19 +178,27 @@ pub fn assess(
         }
     };
 
-    let terminal = ancestors
+    let own_terminal = process
+        .program
+        .as_ref()
+        .filter(|program| is_terminal_program(program))
+        .map(|program| TerminalAssociation::SelfObserved {
+            program: program.clone(),
+        });
+    let ancestor_terminal = ancestors
         .iter()
         .filter_map(|ancestor| {
             let program = scan.get(ancestor)?.program.as_ref()?;
-            TERMINAL_PROGRAMS
-                .iter()
-                .any(|known| program.trim_start_matches('-').eq_ignore_ascii_case(known))
-                .then(|| TerminalAssociation::Observed {
-                    identity: *ancestor,
-                    program: program.clone(),
-                })
+            is_terminal_program(program).then(|| TerminalAssociation::Observed {
+                identity: *ancestor,
+                program: program.clone(),
+            })
         })
-        .next()
+        .next();
+    let own_matched = own_terminal.is_some();
+    let ancestor_matched = ancestor_terminal.is_some();
+    let terminal = own_terminal
+        .or(ancestor_terminal)
         .unwrap_or(TerminalAssociation::NotObserved);
     let ancestry = Ancestry { hops, outcome };
 
@@ -203,7 +215,10 @@ pub fn assess(
     if owner_uid.is_some_and(|uid| uid < SYSTEM_UID_THRESHOLD) {
         reasons.push(EligibilityReason::SystemOwner);
     }
-    if matches!(terminal, TerminalAssociation::Observed { .. }) {
+    if own_matched {
+        reasons.push(EligibilityReason::OwnTerminalProgram);
+    }
+    if ancestor_matched {
         reasons.push(EligibilityReason::ActiveTerminal);
     }
     if !reasons.is_empty() {
@@ -242,6 +257,13 @@ pub fn assess(
         ancestry: Some(ancestry),
         terminal,
     }
+}
+
+/// Returns whether a program label names a known terminal, shell, or multiplexer.
+fn is_terminal_program(program: &str) -> bool {
+    TERMINAL_PROGRAMS
+        .iter()
+        .any(|known| program.trim_start_matches('-').eq_ignore_ascii_case(known))
 }
 
 /// Returns the current process identity when it appears in the scan.
@@ -403,6 +425,88 @@ mod tests {
         assert_eq!(result.terminal, TerminalAssociation::NotObserved);
         assert_eq!(result.state, EligibilityState::Eligible);
         assert!(result.reasons.is_empty());
+    }
+
+    #[test]
+    fn standalone_and_reparented_terminals_are_protected_by_own_label() {
+        for program in ["zsh", "bash", "kitty", "tmux"] {
+            for parent in [ParentContext::NoParent, ParentContext::PidOnly(1)] {
+                let row = provenance(1, 1, parent, Some(program), Some(501));
+                let result = assess(row.identity(), &scan(vec![row]), None);
+                assert_eq!(result.state, EligibilityState::Protected, "{program}");
+                assert_eq!(
+                    result.reasons,
+                    vec![EligibilityReason::OwnTerminalProgram],
+                    "{program}"
+                );
+                assert_eq!(
+                    result.terminal,
+                    TerminalAssociation::SelfObserved {
+                        program: program.into()
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn own_and_ancestor_terminal_report_both_reasons() {
+        let rows = vec![
+            provenance(1, 1, resolved(2, 1), Some("tmux"), Some(501)),
+            provenance(2, 1, ParentContext::NoParent, Some("zsh"), Some(501)),
+        ];
+        let result = assess((1, 1), &scan(rows), None);
+        assert_eq!(
+            result.terminal,
+            TerminalAssociation::SelfObserved {
+                program: "tmux".into()
+            }
+        );
+        assert_eq!(
+            result.reasons,
+            vec![
+                EligibilityReason::OwnTerminalProgram,
+                EligibilityReason::ActiveTerminal
+            ]
+        );
+    }
+
+    #[test]
+    fn ordinary_user_worker_with_complete_ancestry_stays_eligible() {
+        let rows = vec![
+            provenance(1, 1, resolved(2, 1), Some("devserver"), Some(501)),
+            provenance(2, 1, ParentContext::NoParent, Some("launchd"), Some(501)),
+        ];
+        let result = assess((1, 1), &scan(rows), None);
+        assert_eq!(result.state, EligibilityState::Eligible);
+        assert!(result.reasons.is_empty());
+        assert_eq!(result.terminal, TerminalAssociation::NotObserved);
+    }
+
+    #[test]
+    fn missing_own_program_is_not_detachment() {
+        let rows = vec![
+            provenance(1, 1, resolved(2, 1), None, Some(501)),
+            provenance(2, 1, ParentContext::NoParent, Some("launchd"), Some(501)),
+        ];
+        let result = assess((1, 1), &scan(rows), None);
+        assert_eq!(result.state, EligibilityState::Eligible);
+        assert!(result.reasons.is_empty());
+        assert_eq!(result.terminal, TerminalAssociation::NotObserved);
+    }
+
+    #[test]
+    fn login_shell_own_label_is_terminal_evidence() {
+        let row = provenance(1, 1, ParentContext::NoParent, Some("-zsh"), Some(501));
+        let result = assess(row.identity(), &scan(vec![row]), None);
+        assert_eq!(result.state, EligibilityState::Protected);
+        assert_eq!(result.reasons, vec![EligibilityReason::OwnTerminalProgram]);
+        assert_eq!(
+            result.terminal,
+            TerminalAssociation::SelfObserved {
+                program: "-zsh".into()
+            }
+        );
     }
 
     #[test]
