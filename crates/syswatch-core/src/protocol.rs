@@ -6,6 +6,7 @@
 use serde::de::IntoDeserializer;
 use serde::{Deserialize, Serialize};
 
+use crate::findings::{self, AdvisoryFinding, SuggestionsSnapshot};
 use crate::snapshot::{AggregateSnapshot, ProcessSnapshot, SystemSnapshot};
 
 /// Protocol version supported by this module.
@@ -13,6 +14,9 @@ pub const PROTOCOL_VERSION: u32 = 1;
 
 /// Maximum request frame size in bytes.
 pub const MAX_REQUEST_BYTES: usize = 4096;
+
+/// Maximum number of findings in a suggestions response.
+pub const MAX_SUGGESTIONS: usize = 64;
 
 const MALFORMED_MESSAGE: &str =
     "request is not a JSON object with integer version and string command";
@@ -34,6 +38,8 @@ pub enum RequestCommand {
     Status,
     /// Request the latest process list.
     Processes,
+    /// Request the latest advisory findings.
+    Suggestions,
 }
 
 /// Stable machine-readable protocol error code.
@@ -85,6 +91,17 @@ pub enum Response {
         /// Processes in collector order.
         processes: Vec<ProcessSnapshot>,
     },
+    /// Latest evaluated advisory findings.
+    Suggestions {
+        /// Protocol version used by this response.
+        version: u32,
+        /// Evaluation time in milliseconds since the Unix epoch.
+        evaluated_at_ms: u64,
+        /// Process scan time in milliseconds since the Unix epoch.
+        processes_updated_at_ms: u64,
+        /// Findings sorted by identity and observation time.
+        findings: Vec<AdvisoryFinding>,
+    },
     /// Error response for a rejected request.
     Error {
         /// Protocol version used by this response.
@@ -128,6 +145,27 @@ impl Response {
             observed_at_ms: snapshot.timestamp_ms,
             processes_updated_at_ms,
             processes: snapshot.processes.clone(),
+        }
+    }
+
+    /// Build an advisory response, or an unavailable error before evaluation.
+    pub fn suggestions(snapshot: Option<&SuggestionsSnapshot>) -> Self {
+        let Some(snapshot) = snapshot else {
+            return Self::error(ProtocolError {
+                code: ErrorCode::Unavailable,
+                message:
+                    "suggestions are not available until enough process history has been collected"
+                        .into(),
+            });
+        };
+        let mut findings = snapshot.findings.clone();
+        findings::sort(&mut findings);
+        findings.truncate(MAX_SUGGESTIONS);
+        Self::Suggestions {
+            version: PROTOCOL_VERSION,
+            evaluated_at_ms: snapshot.evaluated_at_ms,
+            processes_updated_at_ms: snapshot.processes_updated_at_ms,
+            findings,
         }
     }
 
@@ -266,6 +304,107 @@ mod tests {
             assert_eq!(serde_json::from_str::<Request>(json).unwrap(), request);
             assert_eq!(decode_request(json).unwrap(), request);
         }
+    }
+
+    fn finding(pid: u32) -> crate::AdvisoryFinding {
+        use crate::{
+            AdvisoryFinding, Confidence, CpuActivity, FindingEvidence, FindingId, FindingKind,
+            MemoryActivity,
+        };
+        AdvisoryFinding {
+            id: FindingId {
+                pid,
+                start_time_secs: 5,
+                kind: FindingKind::Memory,
+            },
+            confidence: Confidence::Medium,
+            observed_at_ms: 6,
+            explanation: "Observed idle memory use".into(),
+            evidence: FindingEvidence {
+                sample_count: 2,
+                span_ms: 4,
+                cpu: Some(CpuActivity {
+                    max_percent: 1.0,
+                    mean_percent: 0.5,
+                    valid_samples: 2,
+                }),
+                memory: Some(MemoryActivity {
+                    latest_bytes: 100,
+                    max_bytes: 200,
+                }),
+            },
+        }
+    }
+
+    fn suggestions(findings: Vec<crate::AdvisoryFinding>) -> crate::SuggestionsSnapshot {
+        crate::SuggestionsSnapshot {
+            evaluated_at_ms: 7,
+            processes_updated_at_ms: 6,
+            findings,
+        }
+    }
+
+    #[test]
+    fn suggestions_request_round_trips() {
+        let json = r#"{"version":1,"command":"suggestions"}"#;
+        let request = decode_request(json).unwrap();
+        assert_eq!(request.command, RequestCommand::Suggestions);
+        assert_eq!(encode_line(&request).unwrap(), json);
+    }
+
+    #[test]
+    fn suggestions_wire_shape_is_stable() {
+        let response = Response::suggestions(Some(&suggestions(vec![finding(42)])));
+        let line = encode_line(&response).unwrap();
+        assert_eq!(
+            line,
+            r#"{"kind":"suggestions","version":1,"evaluated_at_ms":7,"processes_updated_at_ms":6,"findings":[{"id":{"pid":42,"start_time_secs":5,"kind":"memory"},"confidence":"medium","observed_at_ms":6,"explanation":"Observed idle memory use","evidence":{"sample_count":2,"span_ms":4,"cpu":{"max_percent":1.0,"mean_percent":0.5,"valid_samples":2},"memory":{"latest_bytes":100,"max_bytes":200}}}]}"#
+        );
+        assert_eq!(serde_json::from_str::<Response>(&line).unwrap(), response);
+    }
+
+    #[test]
+    fn empty_findings_list_is_not_unavailable() {
+        assert_eq!(
+            encode_line(&Response::suggestions(Some(&suggestions(vec![])))).unwrap(),
+            r#"{"kind":"suggestions","version":1,"evaluated_at_ms":7,"processes_updated_at_ms":6,"findings":[]}"#
+        );
+    }
+
+    #[test]
+    fn never_evaluated_suggestions_reports_unavailable() {
+        assert_eq!(
+            encode_line(&Response::suggestions(None)).unwrap(),
+            r#"{"kind":"error","version":1,"code":"unavailable","message":"suggestions are not available until enough process history has been collected"}"#
+        );
+    }
+
+    #[test]
+    fn suggestions_reply_is_bounded() {
+        let input = suggestions((1..=65).rev().map(finding).collect());
+        let Response::Suggestions { findings, .. } = Response::suggestions(Some(&input)) else {
+            panic!("expected suggestions")
+        };
+        assert_eq!(findings.len(), 64);
+        assert_eq!(findings.first().unwrap().id.pid, 1);
+        assert_eq!(findings.last().unwrap().id.pid, 64);
+        assert!(findings.windows(2).all(
+            |pair| (pair[0].id, pair[0].observed_at_ms) <= (pair[1].id, pair[1].observed_at_ms)
+        ));
+    }
+
+    #[test]
+    fn suggestions_are_additive_within_protocol_version_one() {
+        assert_eq!(PROTOCOL_VERSION, 1);
+        assert_eq!(
+            decode_request(r#"{"version":1,"command":"suggestions"}"#)
+                .unwrap()
+                .command,
+            RequestCommand::Suggestions
+        );
+        let error = decode_request(r#"{"version":2,"command":"suggestions"}"#).unwrap_err();
+        assert_eq!(error.code, ErrorCode::UnsupportedVersion);
+        assert!(error.message.contains('2') && error.message.contains('1'));
     }
 
     #[test]
@@ -478,7 +617,11 @@ mod tests {
                 process("loginwindow", 44),
             ],
         );
-        for response in [Response::status(&snapshot), Response::processes(&snapshot)] {
+        for response in [
+            Response::status(&snapshot),
+            Response::processes(&snapshot),
+            Response::suggestions(Some(&suggestions(vec![finding(42)]))),
+        ] {
             let line = encode_line(&response).unwrap();
             for forbidden in [
                 "/Users",

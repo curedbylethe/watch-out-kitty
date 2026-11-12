@@ -255,6 +255,7 @@ where
                     Some(snapshot) => match request.command {
                         RequestCommand::Status => Response::status(&snapshot),
                         RequestCommand::Processes => Response::processes(&snapshot),
+                        RequestCommand::Suggestions => Response::suggestions(None),
                     },
                     None => Response::error(ProtocolError {
                         code: ErrorCode::Unavailable,

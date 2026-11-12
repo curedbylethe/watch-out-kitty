@@ -160,6 +160,17 @@ pub struct AdvisoryFinding {
     pub evidence: FindingEvidence,
 }
 
+/// Advisory findings evaluated for one process scan.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SuggestionsSnapshot {
+    /// Evaluation time in milliseconds since the Unix epoch.
+    pub evaluated_at_ms: u64,
+    /// Process scan time in milliseconds since the Unix epoch.
+    pub processes_updated_at_ms: u64,
+    /// Findings from the evaluation.
+    pub findings: Vec<AdvisoryFinding>,
+}
+
 /// Sorts findings by stable ID, then observation time.
 pub fn sort(findings: &mut [AdvisoryFinding]) {
     findings.sort_by_key(|finding| (finding.id, finding.observed_at_ms));

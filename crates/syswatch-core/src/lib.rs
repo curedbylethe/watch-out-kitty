@@ -21,7 +21,7 @@ pub use eligibility::{
 };
 pub use findings::{
     AdvisoryFinding, Confidence, CpuActivity, FindingEvidence, FindingId, FindingKind,
-    MemoryActivity,
+    MemoryActivity, SuggestionsSnapshot,
 };
 pub use history::{HistoryLimits, ProcessHistory, ProcessObservation, ProcessRecord};
 pub use snapshot::{AggregateSnapshot, MemorySnapshot, ProcessSnapshot, SystemSnapshot};
