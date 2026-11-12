@@ -43,16 +43,15 @@ impl FindingEvidence {
     pub fn from_record(record: &ProcessRecord) -> Self {
         let observations = record.observations();
         let sample_count = observations.len();
-        let (min_timestamp, max_timestamp) = observations
-            .iter()
-            .map(|observation| observation.timestamp_ms)
-            .fold(None::<(u64, u64)>, |bounds, timestamp| {
-                Some(match bounds {
-                    Some((min, max)) => (min.min(timestamp), max.max(timestamp)),
-                    None => (timestamp, timestamp),
-                })
-            })
-            .unwrap_or((0, 0));
+        let timestamps = || {
+            observations
+                .iter()
+                .map(|observation| observation.timestamp_ms)
+        };
+        let span_ms = timestamps()
+            .max()
+            .zip(timestamps().min())
+            .map_or(0, |(max, min)| max - min);
 
         let mut valid_cpu = observations
             .iter()
@@ -73,22 +72,20 @@ impl FindingEvidence {
         let memory = observations
             .iter()
             .max_by_key(|observation| observation.timestamp_ms)
-            .map(|latest| MemoryActivity {
-                latest_bytes: latest.memory_bytes,
-                max_bytes: observations
+            .zip(
+                observations
                     .iter()
                     .map(|observation| observation.memory_bytes)
-                    .max()
-                    .unwrap(),
+                    .max(),
+            )
+            .map(|(latest, max_bytes)| MemoryActivity {
+                latest_bytes: latest.memory_bytes,
+                max_bytes,
             });
 
         Self {
             sample_count,
-            span_ms: if sample_count < 2 {
-                0
-            } else {
-                max_timestamp.saturating_sub(min_timestamp)
-            },
+            span_ms,
             cpu,
             memory,
         }
@@ -407,8 +404,10 @@ mod tests {
     #[test]
     fn evidence_memory_latest_uses_greatest_timestamp() {
         let record = record(&[(200, 50.0, 20), (100, 55.0, 80)], 1_000, 10);
-        let memory = FindingEvidence::from_record(&record).memory.unwrap();
+        let evidence = FindingEvidence::from_record(&record);
+        let memory = evidence.memory.unwrap();
 
+        assert_eq!(evidence.span_ms, 100);
         assert_eq!(memory.latest_bytes, 20);
         assert_eq!(memory.max_bytes, 80);
     }
