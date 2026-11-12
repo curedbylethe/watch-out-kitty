@@ -2,14 +2,8 @@
 
 mod common;
 
-use common::{Daemon, POLL, TempDir, request, request_line, socket_path};
-use std::{
-    fs,
-    os::unix::fs::PermissionsExt,
-    process::Command,
-    thread,
-    time::{Duration, Instant},
-};
+use common::{Daemon, TempDir, poll, request, request_line, socket_path};
+use std::{fs, os::unix::fs::PermissionsExt, process::Command};
 use syswatch_core::protocol::RequestCommand;
 
 #[test]
@@ -22,18 +16,9 @@ fn daemon_socket_lifecycle_uses_cached_protocol_and_cleans_up_on_sigterm() {
         0o700
     );
 
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let response = loop {
-        if let Ok(response) = request(daemon.socket(), &request_line(RequestCommand::Status)) {
-            if response.contains("\"kind\":\"status\"") {
-                break response;
-            }
-            assert!(response.contains("\"code\":\"unavailable\""));
-        }
-        assert!(Instant::now() < deadline, "daemon did not serve a snapshot");
-        thread::sleep(POLL);
-    };
-    assert!(response.contains("\"kind\":\"status\""));
+    let _response = poll(&daemon, RequestCommand::Status, |line| {
+        line.contains("\"kind\":\"status\"")
+    });
     assert_eq!(
         fs::symlink_metadata(&socket).unwrap().permissions().mode() & 0o777,
         0o600
