@@ -152,6 +152,8 @@ Eligibility assessment decides whether a later advisory rule may consider a
 process at all. It has exactly three states: `Protected`, `Eligible`, and
 `Unknown`. Unknown terminal association means evidence is missing, not that a
 process is detached.
+A process's own program label counts as terminal evidence, reported separately
+from ancestor evidence; missing ancestry is not evidence of detachment.
 
 ## Protocol
 
