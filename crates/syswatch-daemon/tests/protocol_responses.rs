@@ -152,7 +152,23 @@ fn concurrent_clients_are_served() {
 fn process_and_status_agree_on_freshness_fields() {
     let dir = TempDir::new();
     let daemon = Daemon::start(&dir);
-    let status = response(&daemon, RequestCommand::Status, "status");
+    let line = request_line(RequestCommand::Status);
+    let mut sampled = None;
+    assert!(
+        wait_until(Duration::from_secs(5), || {
+            if let Ok(reply) = request(daemon.socket(), &line)
+                && line_contains(&reply, "\"kind\":\"status\"")
+                && field_u64(&reply, "processes_updated_at_ms").is_some()
+            {
+                sampled = Some(reply);
+                true
+            } else {
+                false
+            }
+        }),
+        "daemon did not return a status response with process data"
+    );
+    let status = sampled.unwrap();
     let processes = response(&daemon, RequestCommand::Processes, "processes");
     let status_time = field_u64(&status, "processes_updated_at_ms").unwrap();
     let process_time = field_u64(&processes, "processes_updated_at_ms").unwrap();
