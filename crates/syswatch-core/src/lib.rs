@@ -2,6 +2,7 @@
 
 pub mod collector;
 pub mod config;
+pub mod eligibility;
 pub mod findings;
 pub mod history;
 #[cfg(unix)]
@@ -12,6 +13,10 @@ pub mod report;
 pub mod snapshot;
 pub use collector::Collector;
 pub use config::{ConfigError, MonitoringConfig};
+pub use eligibility::{
+    Ancestry, AncestryOutcome, EligibilityAssessment, EligibilityReason, EligibilityState,
+    MAX_ANCESTRY_DEPTH, SYSTEM_UID_THRESHOLD, TERMINAL_PROGRAMS, TerminalAssociation,
+};
 pub use findings::{
     AdvisoryFinding, Confidence, CpuActivity, FindingEvidence, FindingId, FindingKind,
     MemoryActivity,
