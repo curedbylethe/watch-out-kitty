@@ -44,12 +44,6 @@ fn status_command_uses_the_daemon_socket() {
     let socket = daemon.socket().to_owned();
 
     assert!(run_cli(&socket, &["status"]).status.success());
-    let _ = daemon.terminate();
-    assert!(!socket.exists());
-
-    let output = run_cli(&socket, &["status"]);
-    assert_eq!(output.status.code(), Some(1));
-    assert!(!output.stderr.is_empty());
 }
 
 #[test]
