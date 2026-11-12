@@ -153,6 +153,7 @@ mod tests {
             ProcessScan {
                 processes: vec![],
                 observed_at_ms: 2,
+                suggestions: None,
             }
         }
     }

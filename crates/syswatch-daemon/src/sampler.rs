@@ -1,9 +1,13 @@
-use syswatch_core::{AggregateSnapshot, Collector, ProcessHistory, ProcessSnapshot};
+use syswatch_core::{
+    AggregateSnapshot, Collector, DetectorConfig, ProcessHistory, ProcessSnapshot,
+    SuggestionsSnapshot, detector::detect_idle_memory_consumers,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProcessScan {
     pub processes: Vec<ProcessSnapshot>,
     pub observed_at_ms: u64,
+    pub suggestions: Option<SuggestionsSnapshot>,
 }
 
 pub trait Sampler {
@@ -14,6 +18,9 @@ pub trait Sampler {
 pub struct LiveSampler {
     collector: Collector,
     history: ProcessHistory,
+    detector_config: DetectorConfig,
+    started_at_ms: Option<u64>,
+    scans: u64,
 }
 
 impl LiveSampler {
@@ -21,6 +28,9 @@ impl LiveSampler {
         Ok(Self {
             collector: Collector::new().map_err(|error| error.to_string())?,
             history: ProcessHistory::new(),
+            detector_config: DetectorConfig::default(),
+            started_at_ms: None,
+            scans: 0,
         })
     }
 
@@ -41,16 +51,65 @@ impl Sampler for LiveSampler {
             .processes_updated_at_ms()
             .expect("process refresh sets timestamp");
         self.history.record_scan(observed_at_ms, &processes);
+        let started_at_ms = *self.started_at_ms.get_or_insert(observed_at_ms);
+        self.scans = self.scans.saturating_add(1);
+        let suggestions = suggestions_ready(
+            started_at_ms,
+            observed_at_ms,
+            self.scans,
+            &self.detector_config,
+        )
+        .then(|| SuggestionsSnapshot {
+            evaluated_at_ms: observed_at_ms,
+            processes_updated_at_ms: observed_at_ms,
+            findings: detect_idle_memory_consumers(
+                &self.history,
+                observed_at_ms,
+                self.collector.provenance(),
+                &self.detector_config,
+            ),
+        });
         ProcessScan {
             processes,
             observed_at_ms,
+            suggestions,
         }
     }
 }
 
+fn suggestions_ready(started_at_ms: u64, now_ms: u64, scans: u64, config: &DetectorConfig) -> bool {
+    scans > config.min_valid_observations as u64
+        && now_ms.saturating_sub(started_at_ms) >= config.min_span_ms
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{LiveSampler, Sampler};
+    use super::{LiveSampler, Sampler, suggestions_ready};
+    use syswatch_core::DetectorConfig;
+
+    #[test]
+    fn suggestions_are_unavailable_before_the_observation_window() {
+        assert!(
+            LiveSampler::new()
+                .unwrap()
+                .refresh_processes()
+                .suggestions
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn suggestions_ready_requires_scan_count_and_span() {
+        let config = DetectorConfig {
+            min_valid_observations: 3,
+            min_span_ms: 1000,
+            ..DetectorConfig::default()
+        };
+        assert!(!suggestions_ready(0, 1000, 3, &config));
+        assert!(suggestions_ready(0, 1000, 4, &config));
+        assert!(!suggestions_ready(0, 999, 4, &config));
+        assert!(suggestions_ready(0, 1001, 4, &config));
+    }
 
     #[test]
     fn live_sampler_records_every_process_scan_in_history() {
