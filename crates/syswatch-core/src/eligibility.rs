@@ -22,7 +22,6 @@ pub const TERMINAL_PROGRAMS: &[&str] = &[
     "Terminal",
     "iTerm2",
     "Alacritty",
-    "alacritty",
     "WezTerm",
     "wezterm-gui",
     "Hyper",
@@ -442,7 +441,6 @@ mod tests {
         let row = provenance(1, 1, ParentContext::PidOnly(1), None, Some(501));
         let result = assess(row.identity(), &scan(vec![row]), None);
         assert_eq!(result.state, EligibilityState::Unknown);
-        assert_ne!(result.state, EligibilityState::Eligible);
     }
 
     #[test]
