@@ -135,14 +135,14 @@ impl FindingId {
 )]
 #[serde(rename_all = "snake_case")]
 pub enum Confidence {
-    /// Evidence is missing, covers one sample, or covers too short a window to
-    /// separate a transient spike from sustained activity.
+    /// Fewer than two retained observations support the finding, or no valid
+    /// measurement exists for its kind.
     Low,
-    /// Several valid samples support the finding, but the window is short
-    /// relative to retained history or the samples are irregular.
+    /// At least two retained observations support the finding, but one or more
+    /// retained observations lack a valid measurement for its kind.
     Medium,
-    /// Valid samples span the retained observation window with no unexplained
-    /// gaps and consistent measurements.
+    /// Every retained observation has a valid measurement for the finding kind,
+    /// and at least two observations are retained.
     High,
 }
 

@@ -116,13 +116,13 @@ An advisory finding describes a process identity, finding kind, confidence,
 observation time, explanation, and evidence aggregated from retained process
 history samples. Evidence covers sampled CPU and memory activity only.
 
-Confidence describes evidence coverage. Low means evidence is missing, covers a
-single sample, or spans too little time to separate a transient spike from
-sustained activity. Medium means several valid samples support the finding, but
-the window is short relative to retained history or samples are irregular. High
-means valid samples span the retained observation window with no unexplained
-gaps and consistent measurements. Confidence does not say whether a process is
-stale, safe, or safe to terminate. A finding invites inspection.
+Confidence describes evidence coverage for the finding's kind. Low means fewer
+than two retained observations support the finding, or no valid measurement
+exists. Medium means at least two observations support the finding, but one or
+more retained observations lack a valid measurement. High means every retained
+observation has a valid measurement and at least two observations are retained.
+Confidence does not say whether a process is stale, safe, or safe to terminate.
+A finding invites inspection.
 
 No detector or command produces findings yet. The daemon does not produce them,
 and the CLI does not show them.
