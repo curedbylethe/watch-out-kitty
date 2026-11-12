@@ -43,7 +43,8 @@ request line per connection; the server closes the connection after its reply.
 This repository contains the telemetry crate, snapshot example, foreground
 daemon, and `syswatch status` and `syswatch top` commands; it does not yet
 display an indicator in Kitty. A background service and advisory process
-recommendations are planned. See the
+recommendations are planned. The core library defines an advisory finding
+model, but no detector or command produces findings yet. See the
 [issue tracker](https://github.com/curedbylethe/watch-out-kitty/issues) for
 planned work and [issue #13](https://github.com/curedbylethe/watch-out-kitty/issues/13)
 for contributor guidance.
@@ -68,6 +69,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-core` | Telemetry library |
 | `crates/syswatch-core/src/collector.rs` | System sampling |
 | `crates/syswatch-core/src/config.rs` | Validated monitoring intervals |
+| `crates/syswatch-core/src/findings.rs` | Advisory finding model and evidence |
 | `crates/syswatch-core/src/history.rs` | Bounded process observation history |
 | `crates/syswatch-core/src/ipc.rs` | Daemon socket path resolution |
 | `crates/syswatch-core/src/lib.rs` | Public core modules and exports |
@@ -107,6 +109,23 @@ age line under the table (for example, `process data: 4.2 s old`) shows its age;
 before the first scan it prints `process data: unavailable`. Per-process CPU
 can exceed 100%; nonfinite CPU values render as `n/a`. Rows sort by the selected
 key, then by PID and start time.
+
+### Advisory findings
+
+An advisory finding describes a process identity, finding kind, confidence,
+observation time, explanation, and evidence aggregated from retained process
+history samples. Evidence covers sampled CPU and memory activity only.
+
+Confidence describes evidence coverage. Low means evidence is missing, covers a
+single sample, or spans too little time to separate a transient spike from
+sustained activity. Medium means several valid samples support the finding, but
+the window is short relative to retained history or samples are irregular. High
+means valid samples span the retained observation window with no unexplained
+gaps and consistent measurements. Confidence does not say whether a process is
+stale, safe, or safe to terminate. A finding invites inspection.
+
+No detector or command produces findings yet. The daemon does not produce them,
+and the CLI does not show them.
 
 ## Protocol
 
