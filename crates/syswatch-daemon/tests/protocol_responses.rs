@@ -115,5 +115,4 @@ fn process_and_status_agree_on_freshness_fields() {
     let status_time = field_u64(&status, "processes_updated_at_ms").unwrap();
     let process_time = field_u64(&processes, "processes_updated_at_ms").unwrap();
     assert!((status_time.abs_diff(process_time)) <= 60_000);
-    assert!(!field_is_null(&status, "processes_updated_at_ms"));
 }
