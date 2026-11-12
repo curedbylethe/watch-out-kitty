@@ -1,10 +1,13 @@
 use std::{
-    ffi::OsStr,
+    collections::BTreeMap,
+    ffi::{OsStr, OsString},
+    path::{Path, PathBuf},
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
-use sysinfo::{MemoryRefreshKind, Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{MemoryRefreshKind, Pid, ProcessRefreshKind, ProcessesToUpdate, System, UpdateKind};
 
+use crate::provenance::{ParentContext, ProcessProvenance};
 use crate::snapshot::{AggregateSnapshot, MemorySnapshot, ProcessSnapshot, SystemSnapshot};
 
 /// Stateful collector for aggregate CPU and physical-memory usage.
@@ -15,6 +18,7 @@ pub struct Collector {
     last_cpu_sample_ms: Option<u64>,
     last_processes_updated_ms: Option<u64>,
     cached_processes: Vec<ProcessSnapshot>,
+    provenance: BTreeMap<(u32, u64), ProcessProvenance>,
     #[cfg(test)]
     process_refresh_calls: usize,
 }
@@ -29,6 +33,7 @@ impl Collector {
             last_cpu_sample_ms: None,
             last_processes_updated_ms: None,
             cached_processes: Vec::new(),
+            provenance: BTreeMap::new(),
             #[cfg(test)]
             process_refresh_calls: 0,
         })
@@ -76,6 +81,9 @@ impl Collector {
             ProcessRefreshKind::nothing()
                 .with_cpu()
                 .with_memory()
+                .with_user(UpdateKind::OnlyIfNotSet)
+                .with_exe(UpdateKind::OnlyIfNotSet)
+                .with_cmd(UpdateKind::OnlyIfNotSet)
                 .without_tasks(),
         );
         #[cfg(test)]
@@ -83,21 +91,35 @@ impl Collector {
             self.process_refresh_calls += 1;
         }
 
-        self.cached_processes = self
+        let (processes, provenance_rows): (Vec<_>, Vec<_>) = self
             .system
             .processes()
             .values()
             .map(|process| {
-                process_snapshot(
-                    process.pid().as_u32(),
-                    process.parent().map(Pid::as_u32),
-                    process.name(),
-                    process.cpu_usage(),
-                    process.memory(),
-                    process.start_time(),
+                let pid = process.pid().as_u32();
+                let start_time_secs = process.start_time();
+                (
+                    process_snapshot(
+                        pid,
+                        process.parent().map(Pid::as_u32),
+                        process.name(),
+                        process.cpu_usage(),
+                        process.memory(),
+                        start_time_secs,
+                    ),
+                    RawProvenance {
+                        pid,
+                        start_time_secs,
+                        executable: process.exe().map(Path::to_path_buf),
+                        cmd: process.cmd().to_vec(),
+                        owner_uid: process.user_id().map(|uid| **uid),
+                        parent_pid: process.parent().map(Pid::as_u32),
+                    },
                 )
             })
-            .collect();
+            .unzip();
+        self.cached_processes = processes;
+        self.provenance = build_provenance(provenance_rows);
         self.last_processes_updated_ms = Some(timestamp_ms());
         &self.cached_processes
     }
@@ -110,6 +132,19 @@ impl Collector {
     /// Returns when the cached process observations were collected.
     pub fn processes_updated_at_ms(&self) -> Option<u64> {
         self.last_processes_updated_ms
+    }
+
+    /// Returns provenance from the latest completed process scan.
+    ///
+    /// The map is empty before the first refresh. An absent identity means the
+    /// process exited or was never observed.
+    pub fn provenance(&self) -> &BTreeMap<(u32, u64), ProcessProvenance> {
+        &self.provenance
+    }
+
+    /// Returns provenance for one process identity from the latest scan.
+    pub fn provenance_for(&self, identity: (u32, u64)) -> Option<&ProcessProvenance> {
+        self.provenance.get(&identity)
     }
 
     /// Refreshes aggregate metrics and processes in one call.
@@ -133,6 +168,46 @@ impl Collector {
     fn process_refresh_calls(&self) -> usize {
         self.process_refresh_calls
     }
+}
+
+struct RawProvenance {
+    pid: u32,
+    start_time_secs: u64,
+    executable: Option<PathBuf>,
+    cmd: Vec<OsString>,
+    owner_uid: Option<u32>,
+    parent_pid: Option<u32>,
+}
+
+fn build_provenance(rows: Vec<RawProvenance>) -> BTreeMap<(u32, u64), ProcessProvenance> {
+    let identities: BTreeMap<_, _> = rows
+        .iter()
+        .map(|row| (row.pid, (row.pid, row.start_time_secs)))
+        .collect();
+
+    rows.into_iter()
+        .map(|row| {
+            let parent = match row.parent_pid {
+                Some(pid) => identities
+                    .get(&pid)
+                    .map(|identity| ParentContext::Resolved {
+                        pid: identity.0,
+                        start_time_secs: identity.1,
+                    })
+                    .unwrap_or(ParentContext::PidOnly(pid)),
+                None => ParentContext::NoParent,
+            };
+            let process = ProcessProvenance {
+                pid: row.pid,
+                start_time_secs: row.start_time_secs,
+                executable: row.executable,
+                program: crate::provenance::program_label(row.cmd.first().map(OsString::as_os_str)),
+                owner_uid: row.owner_uid,
+                parent,
+            };
+            (process.identity(), process)
+        })
+        .collect()
 }
 
 fn cpu_refresh_due(last: Option<Instant>, now: Instant) -> bool {
@@ -195,6 +270,147 @@ mod tests {
 
     use super::{Collector, cpu_refresh_due, process_snapshot, snapshot_at};
     use crate::snapshot::{MemorySnapshot, ProcessSnapshot};
+
+    fn raw_provenance(
+        pid: u32,
+        start_time_secs: u64,
+        parent_pid: Option<u32>,
+        cmd: &[&str],
+    ) -> super::RawProvenance {
+        super::RawProvenance {
+            pid,
+            start_time_secs,
+            executable: None,
+            cmd: cmd.iter().map(Into::into).collect(),
+            owner_uid: None,
+            parent_pid,
+        }
+    }
+
+    #[test]
+    fn provenance_is_empty_before_the_first_process_refresh() {
+        let collector = Collector::new().unwrap();
+        assert!(collector.provenance().is_empty());
+    }
+
+    #[test]
+    fn aggregate_refresh_does_not_change_provenance() {
+        let mut collector = Collector::new().unwrap();
+        collector.refresh_processes();
+        let provenance = collector.provenance().clone();
+
+        collector.refresh_aggregate();
+
+        assert_eq!(collector.provenance(), &provenance);
+    }
+
+    #[test]
+    fn parent_identity_resolves_within_one_scan() {
+        use crate::provenance::ParentContext;
+
+        let provenance = super::build_provenance(vec![
+            raw_provenance(10, 100, None, &["parent"]),
+            raw_provenance(11, 101, Some(10), &["child"]),
+        ]);
+
+        assert_eq!(
+            provenance[&(11, 101)].parent,
+            ParentContext::Resolved {
+                pid: 10,
+                start_time_secs: 100
+            }
+        );
+    }
+
+    #[test]
+    fn missing_parent_is_pid_only() {
+        use crate::provenance::ParentContext;
+
+        let provenance =
+            super::build_provenance(vec![raw_provenance(11, 101, Some(10), &["child"])]);
+
+        assert_eq!(provenance[&(11, 101)].parent, ParentContext::PidOnly(10));
+    }
+
+    #[test]
+    fn no_parent_is_distinct_from_pid_only() {
+        use crate::provenance::ParentContext;
+
+        let provenance = super::build_provenance(vec![raw_provenance(11, 101, None, &["child"])]);
+
+        assert_eq!(provenance[&(11, 101)].parent, ParentContext::NoParent);
+    }
+
+    #[test]
+    fn pid_reuse_creates_separate_provenance_entries() {
+        let provenance = super::build_provenance(vec![
+            raw_provenance(11, 101, None, &["old"]),
+            raw_provenance(11, 202, None, &["new"]),
+        ]);
+
+        assert_eq!(provenance.len(), 2);
+        assert!(provenance.contains_key(&(11, 101)));
+        assert!(provenance.contains_key(&(11, 202)));
+    }
+
+    #[test]
+    fn unavailable_fields_remain_none() {
+        let provenance = super::build_provenance(vec![raw_provenance(11, 101, None, &[])]);
+        let process = &provenance[&(11, 101)];
+
+        assert_eq!(process.executable, None);
+        assert_eq!(process.owner_uid, None);
+        assert_eq!(process.program, None);
+    }
+
+    #[test]
+    fn command_arguments_are_not_stored() {
+        let provenance = super::build_provenance(vec![raw_provenance(
+            11,
+            101,
+            None,
+            &["worker", "--token", "hunter2"],
+        )]);
+        let debug = format!("{provenance:?}");
+
+        assert_eq!(provenance[&(11, 101)].program.as_deref(), Some("worker"));
+        assert!(!debug.contains("--token"));
+        assert!(!debug.contains("hunter2"));
+    }
+
+    #[test]
+    fn build_provenance_is_deterministic() {
+        let rows = || {
+            vec![
+                raw_provenance(11, 101, Some(10), &["child"]),
+                raw_provenance(10, 100, None, &["parent"]),
+            ]
+        };
+
+        assert_eq!(
+            super::build_provenance(rows()),
+            super::build_provenance(rows())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn live_scan_enriches_the_current_process() {
+        let mut collector = Collector::new().unwrap();
+        let current = std::process::id();
+        let start_time_secs = collector
+            .refresh_processes()
+            .iter()
+            .find(|process| process.pid == current)
+            .map(|process| process.start_time_secs)
+            .unwrap();
+
+        assert!(
+            collector
+                .provenance_for((current, start_time_secs))
+                .is_some()
+        );
+    }
 
     #[test]
     fn cpu_refresh_is_due_without_a_previous_sample() {
