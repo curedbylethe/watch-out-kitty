@@ -45,9 +45,17 @@ fn stale_socket_file_is_reclaimed() {
     let dir = TempDir::new();
     let socket = socket_path(&dir);
     stale_socket(&socket);
-    assert_eq!(
-        UnixStream::connect(&socket).unwrap_err().kind(),
-        io::ErrorKind::ConnectionRefused
+    assert!(
+        common::wait_until(Duration::from_secs(5), || {
+            match UnixStream::connect(&socket) {
+                Ok(stream) => {
+                    drop(stream);
+                    false
+                }
+                Err(error) => error.kind() == io::ErrorKind::ConnectionRefused,
+            }
+        }),
+        "stale socket did not settle to connection refused"
     );
 
     let daemon = Daemon::start(&dir);
