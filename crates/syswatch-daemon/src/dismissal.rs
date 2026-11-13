@@ -48,6 +48,9 @@ impl DismissedFindings {
 
     /// Drops every dismissal whose `(pid, start_time_secs)` is not in `observed`.
     pub fn retain_observed(&mut self, observed: impl IntoIterator<Item = (u32, u64)>) {
+        if self.entries.is_empty() {
+            return;
+        }
         let observed: BTreeSet<(u32, u64)> = observed.into_iter().collect();
         self.entries
             .retain(|id, _| observed.contains(&id.identity()));
