@@ -22,12 +22,30 @@ fn run() -> Result<(), DaemonError> {
         }
     };
     let latest = scheduler.latest_handle();
-    let server = match syswatch_daemon::ipc::start(socket.clone(), move || {
-        latest
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .cached()
-    }) {
+    let action_latest = std::sync::Arc::clone(&latest);
+    // Two process intervals: the scan behind an action may be one interval old.
+    let max_observation_age_ms = config.process_interval().as_millis() as u64 * 2;
+    let server = match syswatch_daemon::ipc::start(
+        socket.clone(),
+        move || {
+            latest
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .cached()
+        },
+        move |command, finding| {
+            let latest = action_latest
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            syswatch_daemon::action::answer(
+                command,
+                finding,
+                latest.action_state().as_ref(),
+                max_observation_age_ms,
+                &mut syswatch_core::UnixSignalSender,
+            )
+        },
+    ) {
         Ok(server) => server,
         Err(error) => {
             signal_handle.stop();
