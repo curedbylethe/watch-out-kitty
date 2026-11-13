@@ -46,7 +46,9 @@ Process provenance is collector advisory metadata keyed by `(pid, start_time_sec
 retained in provenance; full arguments are not exposed or serialized through
 snapshots or IPC. Environment variables are not collected. Provenance is not
 serialized. A parent relationship is trustworthy only when the parent's start
-time comes from the same scan.
+time comes from the same scan. A zero start time is an unverifiable identity:
+advisory findings and eligibility exclude it, while read-only telemetry still
+shows it. A matching PID or program label does not validate identity.
 
 The daemon evaluates advisory findings during process sampling and serves the
 most recent cached result through the read-only `suggestions` request. Requests
@@ -63,6 +65,8 @@ and confirmation. Advisory findings describe observed evidence and never
 authorize a process action. The eligibility assessment decides only whether a
 process may be considered by a later advisory rule. It reads no CPU, memory,
 or lifetime signal, and unknown terminal association does not mean detached.
+A zero start time is insufficient identity for advice; `Unknown` there is not
+evidence that the process is abandoned.
 
 ## Change discipline
 

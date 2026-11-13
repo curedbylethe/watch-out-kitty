@@ -5,7 +5,9 @@
 //! so this module does not invent a reason. An identity absent from the latest
 //! scan means exited or never observed; `ProcessHistory::disappeared_at_ms`
 //! records exit (`history.rs:411`). A zero `start_time_secs` is unique only per
-//! PID and is not stable across PID reuse. Full `argv` is not retained in
+//! PID and is not stable across PID reuse. Such an identity is insufficient for
+//! advisory findings and eligibility; the process stays in ordinary telemetry.
+//! Full `argv` is not retained in
 //! `ProcessProvenance` or serialized; the collector's system backend owns its
 //! process data. Environment variables are not collected.
 
