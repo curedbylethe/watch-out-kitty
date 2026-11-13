@@ -174,3 +174,47 @@ fn inspect_help_exits_zero() {
         String::from_utf8_lossy(&output.stdout)
     );
 }
+
+#[test]
+fn close_rejects_selectors_and_flags_before_connecting() {
+    let dir = TempDir::new();
+    for args in [&["close"][..], &["close", "42"], &["close", "--yes"]] {
+        let output = run_cli(&socket_path(&dir), args);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("Usage: syswatch close"), "{stderr}");
+        assert!(!stderr.contains("cannot connect"), "{stderr}");
+    }
+}
+
+#[test]
+fn close_without_a_terminal_aborts_before_any_request() {
+    let dir = TempDir::new();
+
+    let output = run_cli(&socket_path(&dir), &["close", "42-1-cpu"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr
+            .contains("syswatch: close requires an interactive terminal; no action was requested"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("cannot connect"), "{stderr}");
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn close_help_exits_zero() {
+    let dir = TempDir::new();
+
+    for args in [&["close", "--help"][..], &["help", "close"]] {
+        let output = run_cli(&socket_path(&dir), args);
+        assert!(output.status.success(), "{args:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stdout)
+                .contains("Usage: syswatch close <finding-reference>"),
+            "{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
+    }
+}
