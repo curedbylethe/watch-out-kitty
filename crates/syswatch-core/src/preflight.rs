@@ -21,8 +21,9 @@ use crate::snapshot::ProcessSnapshot;
 /// This names an intent only. It carries no signal number and authorizes
 /// nothing. A separate action module decides whether one SIGTERM may be
 /// requested after a fresh allowed assessment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
+#[serde(rename_all = "snake_case")]
 pub enum RequestedAction {
     /// The planned `syswatch close` action.
     Close,
@@ -55,7 +56,8 @@ pub struct PreflightObservation<'a> {
 }
 
 /// Outcome of a preflight assessment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PreflightConclusion {
     /// The identity may be offered to a later confirmation step. Grants no permission.
     AllowedForConfirmation,
@@ -66,7 +68,8 @@ pub enum PreflightConclusion {
 }
 
 /// Explicit reason behind a non-allowed conclusion.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PreflightReason {
     /// The caller supplied no observation.
     NoObservation,
@@ -83,7 +86,7 @@ pub enum PreflightReason {
 }
 
 /// Typed result of [`assess`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct PreflightAssessment {
     /// Requested finding identity, echoed from the request.
     pub finding: FindingId,
@@ -224,7 +227,8 @@ pub fn preview(assessment: &PreflightAssessment, process: Option<&ProcessSnapsho
     lines.join("\n")
 }
 
-fn reason_text(reason: &PreflightReason) -> String {
+/// Plain-language text for one reason. Shared by the preview and the CLI.
+pub fn reason_text(reason: &PreflightReason) -> String {
     match reason {
         PreflightReason::NoObservation => "no process observation was supplied".to_owned(),
         PreflightReason::StaleObservation => "observation is older than the allowed age".to_owned(),

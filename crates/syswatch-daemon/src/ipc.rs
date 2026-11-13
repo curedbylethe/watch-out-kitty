@@ -264,6 +264,13 @@ where
                         RequestCommand::Suggestions => {
                             Response::suggestions(cached.suggestions.as_ref())
                         }
+                        // Served by the action handler in a later change.
+                        RequestCommand::ClosePreview | RequestCommand::CloseConfirm => {
+                            Response::error(ProtocolError {
+                                code: ErrorCode::UnsupportedCommand,
+                                message: "close requests are not served yet".into(),
+                            })
+                        }
                     }
                 }
                 Err(error) => Response::error(error),

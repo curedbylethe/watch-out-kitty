@@ -69,6 +69,7 @@ pub fn request_line(command: RequestCommand) -> String {
         encode_line(&Request {
             version: PROTOCOL_VERSION,
             command,
+            finding: None,
         })
         .unwrap()
     )
