@@ -14,6 +14,8 @@ pub mod protocol;
 pub mod provenance;
 pub mod report;
 pub mod snapshot;
+#[cfg(unix)]
+pub use action::UnixSignalSender;
 pub use action::{
     ActionDenial, ActionFailure, ActionOutcome, ActionRequest, SignalDelivery, SignalSender,
 };
