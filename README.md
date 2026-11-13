@@ -141,7 +141,12 @@ usage at or below 1.0% across at least six valid samples spanning at least
 old. At the default 5-second interval, the 60-observation cap permits about
 295 seconds of retained evidence. The detector reports the observed span.
 Warm-up and invalid CPU samples do not count; genuine zero readings can still
-be cold, so this evidence does not prove idleness. Explanations omit process
+be cold, so this evidence does not prove idleness. A process whose start time
+is unknown (zero) is not assessed as a candidate, because `(pid, start_time_secs)`
+is the identity and a matching PID or executable name does not establish it.
+This exclusion affects advice only: `syswatch status`, `syswatch top`, and the
+`processes` reply still show the process and its reported `start_time_secs`.
+Explanations omit process
 names; any renderer adding them must sanitize them as `report.rs` does. Findings
 do not claim a process is safe or safe to terminate. The detector does not
 detect orphaned, stale, or abandoned processes and performs no process control.
@@ -155,7 +160,8 @@ authorizes a process action.
 Eligibility assessment decides whether a later advisory rule may consider a
 process at all. It has exactly three states: `Protected`, `Eligible`, and
 `Unknown`. Unknown terminal association means evidence is missing, not that a
-process is detached.
+process is detached. A zero start time is always `Unknown`, regardless of owner
+or ancestry evidence, because its identity cannot be verified.
 A process's own program label counts as terminal evidence, reported separately
 from ancestor evidence; missing ancestry is not evidence of detachment.
 
