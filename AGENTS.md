@@ -58,6 +58,13 @@ never recompute findings. The reply carries finding identity, confidence,
 timestamps, explanation, and aggregate numeric evidence only; it contains no
 process names, paths, argv, or environment data.
 
+Dismissals of advisory findings are in-memory and daemon-lifetime only; a
+daemon restart clears them. A dismissal is keyed by the complete finding
+identity `(pid, start_time_secs, kind)` and expires when that
+`(pid, start_time_secs)` is absent from a process sample, so a reused PID never
+inherits a dismissal. The registry is bounded. The cached findings stay raw;
+only the served suggestions view omits dismissed findings.
+
 ## Process lifecycle policy
 
 The crate does not detect stale processes or terminate processes. Any future
