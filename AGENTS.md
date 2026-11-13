@@ -49,7 +49,10 @@ Process provenance is collector advisory metadata keyed by `(pid, start_time_sec
 `None` means denied or unavailable. Only the capped file name of `argv[0]` is
 retained in provenance; full arguments are not exposed or serialized through
 snapshots or IPC. Environment variables are not collected. Provenance is not
-serialized. A parent relationship is trustworthy only when the parent's start
+serialized. The daemon stores each scan's provenance with that scan's processes
+(`ProcessScan`), so in-daemon preflight observes one scan. Provenance never
+crosses the socket: a separate reply could read a newer scan than the processes
+it describes. A parent relationship is trustworthy only when the parent's start
 time comes from the same scan. A zero start time is an unverifiable identity:
 advisory findings and eligibility exclude it, while read-only telemetry still
 shows it. A matching PID or program label does not validate identity.
