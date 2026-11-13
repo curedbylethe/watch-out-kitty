@@ -239,6 +239,23 @@ mod tests {
     }
 
     #[test]
+    fn zero_memory_baseline_is_material_only_when_it_becomes_positive() {
+        let mut policy = AlertPolicy::default();
+        let zero = with_memory(finding(42, FindingKind::Memory, Confidence::High), 0);
+        policy.evaluate(std::slice::from_ref(&zero), T);
+        assert!(
+            policy
+                .evaluate(std::slice::from_ref(&zero), T + 1)
+                .is_empty()
+        );
+        let positive = with_memory(finding(42, FindingKind::Memory, Confidence::High), 1);
+        assert_eq!(
+            reasons(&policy.evaluate(&[positive], T + 2)),
+            [AlertReason::EvidenceChanged]
+        );
+    }
+
+    #[test]
     fn sample_and_span_drift_do_not_alert() {
         let mut policy = AlertPolicy::default();
         let base = finding(42, FindingKind::Cpu, Confidence::High);
