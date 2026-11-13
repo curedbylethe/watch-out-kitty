@@ -367,6 +367,21 @@ mod tests {
     }
 
     #[test]
+    fn inspect_accepts_every_printed_reference() {
+        for kind in [FindingKind::Cpu, FindingKind::Memory] {
+            let id = FindingId {
+                pid: 42,
+                start_time_secs: 1_700_000_000,
+                kind,
+            };
+            assert_eq!(
+                parse(args(&["inspect", &id.reference()])),
+                Ok(Command::Inspect { reference: id })
+            );
+        }
+    }
+
+    #[test]
     fn inspect_requires_exactly_one_reference() {
         assert!(
             parse(args(&["inspect"]))
