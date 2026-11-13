@@ -84,9 +84,25 @@ cargo build --workspace
 cargo test --workspace
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+python3 -m unittest discover -s kitty -t kitty -p 'test_*.py'
 ```
 
 `cargo test --workspace` also runs the end-to-end daemon and socket tests; they spawn isolated daemon processes in temporary directories and require no running daemon.
+
+### Python client
+
+`kitty/syswatch_client.py` reads the daemon's cached status and suggestions for Kitty integration code. It needs Python 3.11 or newer and the standard library only. Add the `kitty/` directory to `sys.path`, then `import syswatch_client`.
+
+The client sends one `status` or `suggestions` request per call over the socket described in [Daemon socket](#daemon-socket). It never sends `processes` or a close request, opens no TCP connection, runs no shell command, polls no OS metric, and writes nothing to disk.
+
+- `read_status(socket_path=None, *, timeout_ms=1000, now_ms=None, max_age_ms=None)` returns a `ClientResult`.
+- `read_suggestions(...)` takes the same arguments and returns a `ClientResult`.
+
+`ClientResult.state` is one of `available`, `warming_up`, `stale`, `daemon_unavailable`, `timeout`, `permission_denied`, `socket_path_invalid`, `protocol_mismatch`, `malformed_response`, or `daemon_error`. Expected failures return a state and never raise. Only `available` and `stale` carry `value`; a `stale` result keeps its value so a caller can show how old it is.
+
+The client sets no freshness threshold. With `max_age_ms=None`, `age_ms` reports the age and the state is never `stale`. With an integer, the state is `stale` when the primary timestamp is older than that many milliseconds: `aggregate.timestamp_ms` for status, `evaluated_at_ms` for suggestions.
+
+Run its suite from the repository root with the command in [Development](#development).
 
 ## Project files
 
