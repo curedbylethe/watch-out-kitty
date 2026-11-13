@@ -7,8 +7,9 @@ The Rust 2024 workspace contains `crates/syswatch-core` for telemetry,
 process-ranking, and advisory findings output. The core exposes system collection, bounded process
 history, socket path resolution, snapshot data types, text reporting, and
 advisory findings and eligibility through `src/collector.rs`, `src/detector.rs`, `src/findings.rs`,
-`src/eligibility.rs`, `src/history.rs`, `src/ipc.rs`, `src/preflight.rs`, `src/snapshot.rs`, and
-`src/report.rs`.
+`src/eligibility.rs`, `src/history.rs`, `src/ipc.rs`, `src/preflight.rs`, `src/action.rs` (the typed
+action service that requests at most one SIGTERM after a fresh allowed preflight), `src/snapshot.rs`,
+and `src/report.rs`.
 The CLI modules are `src/args.rs`, `src/client.rs`, `src/output.rs`, and `src/main.rs`.
 The core's `examples/snapshot.rs` prints one diagnostic snapshot. See `README.md`
 for setup and the example.
@@ -78,6 +79,16 @@ A zero start time is insufficient identity for advice; `Unknown` there is not
 evidence that the process is abandoned. A preflight assessment decides only
 whether a later confirmation may be offered; it sends no signal and is never
 permission to act.
+
+The action service in `src/action.rs` takes one finding identity, an admitted
+preflight result, and a delivery-time observation. It runs the preflight rules
+again at delivery, then calls an injected sender at most once. The only signal
+it can request is one SIGTERM. A requested signal is not an exit: the outcome
+records only that the request was accepted. The check-to-signal window is not
+atomic on macOS, which has no `pidfd`; the kernel applies the signal to
+whichever process holds the PID at delivery. Prohibited: SIGKILL, retry,
+escalation, force, sudo, bulk actions, and advisor-triggered actions. Admission
+by preflight is not permission for any of them.
 
 ## Change discipline
 

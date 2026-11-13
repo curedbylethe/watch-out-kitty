@@ -59,7 +59,7 @@ request line per connection; the server closes the connection after its reply.
 
 This repository contains the telemetry crate, snapshot example, foreground
 daemon, and `syswatch status`, `syswatch top`, `syswatch suggestions`, and `syswatch inspect`
-commands, and the core exposes a dry-run process-action preflight that no command uses yet. The daemon evaluates advisory findings on process-sampling ticks,
+commands, and the core exposes a dry-run process-action preflight and an action service that can request one SIGTERM; no command uses either yet. The daemon evaluates advisory findings on process-sampling ticks,
 caches them separately from aggregate telemetry, and serves them through the
 read-only `suggestions` request. No Kitty indicator shows them yet. A background
 service is planned. See the
@@ -97,6 +97,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-core/src/snapshot.rs` | CPU, memory, and process data types |
 | `crates/syswatch-core/src/report.rs` | Human-readable formatting |
 | `crates/syswatch-core/src/preflight.rs` | Dry-run process-action assessment and preview |
+| `crates/syswatch-core/src/action.rs` | Typed action service; requests one SIGTERM after a fresh allowed preflight |
 | `crates/syswatch-core/src/protocol.rs` | Versioned read-only monitoring protocol |
 | `crates/syswatch-core/examples/snapshot.rs` | One-time snapshot example |
 | `crates/syswatch-daemon` | Foreground monitoring daemon |
@@ -199,14 +200,20 @@ reused identity, and every protected, monitor, terminal, ownership, or
 incomplete-evidence result denies.
 
 Passing preflight is not permission. It means only that a later confirmation
-step may be offered. The preflight sends no signal, and the crate still does
-not terminate processes. A separate explicit confirmation step is mandatory
-before any automated termination. The preflight performs no lookup of its own
-and adds no request or reply, so protocol version `1` is unchanged.
+step may be offered. The preflight sends no signal. A separate action service
+in `crates/syswatch-core/src/action.rs` may, on explicit instruction, request
+one SIGTERM after it obtains a fresh allowed preflight result. Immediately
+before the request, it revalidates the identity, existence, and eligibility of
+the process. A requested signal does not mean the process exited. The kernel
+applies the signal to whichever process holds the PID when the signal is sent;
+macOS has no `pidfd`, so identity-safe signalling is not atomic. Prohibited:
+SIGKILL, escalation, retry, force, sudo, bulk actions, and advisor-triggered
+actions. The preflight performs no lookup of its own and adds no request or
+reply, so protocol version `1` is unchanged.
 
 The preview prints the same finding reference that `suggestions` and `inspect`
 use, described above, and states that nothing was executed. No command uses
-preflight yet.
+preflight or the action service yet.
 
 ## Protocol
 
