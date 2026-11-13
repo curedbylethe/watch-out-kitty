@@ -82,7 +82,8 @@ permission to act.
 
 The action service in `src/action.rs` takes one finding identity, an admitted
 preflight result, and a delivery-time observation. It runs the preflight rules
-again at delivery, then calls an injected sender at most once. The only signal
+again at delivery, requires the target's owner UID to equal the caller's UID
+(the caller supplies its real UID), then calls an injected sender at most once. The only signal
 it can request is one SIGTERM. A requested signal is not an exit: the outcome
 records only that the request was accepted. The check-to-signal window is not
 atomic on macOS, which has no `pidfd`; the kernel applies the signal to
