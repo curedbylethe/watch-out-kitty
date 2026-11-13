@@ -1,4 +1,6 @@
-use syswatch_core::{AggregateSnapshot, FindingId, SuggestionsSnapshot, SystemSnapshot};
+use syswatch_core::{
+    AggregateSnapshot, AlertEvent, AlertPolicy, FindingId, SuggestionsSnapshot, SystemSnapshot,
+};
 
 use crate::{dismissal::DismissedFindings, sampler::ProcessScan};
 
@@ -13,6 +15,8 @@ pub struct LatestSnapshot {
     aggregate: Option<AggregateSnapshot>,
     processes: Option<ProcessScan>,
     dismissed: DismissedFindings,
+    alerts: AlertPolicy,
+    alert_events: Vec<AlertEvent>,
 }
 
 impl LatestSnapshot {
@@ -22,11 +26,25 @@ impl LatestSnapshot {
     pub fn set_processes(&mut self, processes: ProcessScan) {
         self.dismissed
             .retain_observed(processes.processes.iter().map(|process| process.identity()));
+        if let Some(suggestions) = &processes.suggestions {
+            let visible = suggestions
+                .findings
+                .iter()
+                .filter(|finding| !self.dismissed.is_dismissed(&finding.id))
+                .cloned()
+                .collect::<Vec<_>>();
+            self.alert_events = self.alerts.evaluate(&visible, processes.observed_at_ms);
+        }
         self.processes = Some(processes);
     }
 
     pub fn dismiss(&mut self, id: FindingId) {
         self.dismissed.dismiss(id);
+    }
+
+    /// Alert events from the latest process tick that carried suggestions.
+    pub fn alert_events(&self) -> &[AlertEvent] {
+        &self.alert_events
     }
 
     pub fn snapshot(&self) -> Option<SystemSnapshot> {
@@ -67,9 +85,12 @@ mod tests {
     use super::{Cached, LatestSnapshot};
     use crate::sampler::ProcessScan;
     use syswatch_core::{
-        AdvisoryFinding, AggregateSnapshot, Confidence, FindingEvidence, FindingId, FindingKind,
-        MemorySnapshot, ProcessSnapshot, SuggestionsSnapshot,
+        AdvisoryFinding, AggregateSnapshot, AlertReason, Confidence, DEFAULT_ALERT_COOLDOWN_MS,
+        FindingEvidence, FindingId, FindingKind, MemorySnapshot, ProcessSnapshot,
+        SuggestionsSnapshot,
     };
+
+    const T: u64 = 1_700_000_000_000;
 
     fn aggregate(timestamp_ms: u64) -> AggregateSnapshot {
         AggregateSnapshot {
@@ -157,9 +178,17 @@ mod tests {
     }
 
     fn scan(processes: Vec<ProcessSnapshot>, findings: Vec<AdvisoryFinding>) -> ProcessScan {
+        scan_at(20, processes, findings)
+    }
+
+    fn scan_at(
+        observed_at_ms: u64,
+        processes: Vec<ProcessSnapshot>,
+        findings: Vec<AdvisoryFinding>,
+    ) -> ProcessScan {
         ProcessScan {
             processes,
-            observed_at_ms: 20,
+            observed_at_ms,
             suggestions: Some(SuggestionsSnapshot {
                 evaluated_at_ms: 20,
                 processes_updated_at_ms: 20,
@@ -280,5 +309,114 @@ mod tests {
             .as_ref()
             .unwrap();
         assert_eq!(raw.findings.len(), 8);
+    }
+
+    fn alert_reasons(latest: &LatestSnapshot) -> Vec<AlertReason> {
+        latest
+            .alert_events()
+            .iter()
+            .map(|event| event.reason)
+            .collect()
+    }
+
+    fn alerting_pids(latest: &LatestSnapshot) -> Vec<u32> {
+        latest
+            .alert_events()
+            .iter()
+            .map(|event| event.id.pid)
+            .collect()
+    }
+
+    #[test]
+    fn identical_repeated_scans_emit_one_new_event() {
+        let mut latest = LatestSnapshot::default();
+        let same = |at| scan_at(at, vec![process(42, 1)], vec![finding(42, 1)]);
+        latest.set_processes(same(T));
+        assert_eq!(alert_reasons(&latest), [AlertReason::New]);
+        latest.set_processes(same(T + 5_000));
+        assert!(latest.alert_events().is_empty());
+        latest.set_processes(same(T + 10_000));
+        assert!(latest.alert_events().is_empty());
+    }
+
+    #[test]
+    fn cooldown_expires_exactly_at_the_boundary_through_the_daemon() {
+        let mut latest = LatestSnapshot::default();
+        let same = |at| scan_at(at, vec![process(42, 1)], vec![finding(42, 1)]);
+        latest.set_processes(same(T));
+        latest.set_processes(same(T + DEFAULT_ALERT_COOLDOWN_MS - 1));
+        assert!(latest.alert_events().is_empty());
+        latest.set_processes(same(T + DEFAULT_ALERT_COOLDOWN_MS));
+        assert_eq!(alert_reasons(&latest), [AlertReason::CooldownExpired]);
+    }
+
+    #[test]
+    fn changed_finding_inside_cooldown_emits_evidence_changed() {
+        let mut latest = LatestSnapshot::default();
+        let mut medium = finding(42, 1);
+        medium.confidence = Confidence::Medium;
+        latest.set_processes(scan_at(T, vec![process(42, 1)], vec![medium]));
+        latest.set_processes(scan_at(
+            T + 5_000,
+            vec![process(42, 1)],
+            vec![finding(42, 1)],
+        ));
+        assert_eq!(alert_reasons(&latest), [AlertReason::EvidenceChanged]);
+    }
+
+    #[test]
+    fn dismissed_finding_never_alerts_and_alerts_again_after_expiry() {
+        let mut latest = LatestSnapshot::default();
+        let both = |at| {
+            scan_at(
+                at,
+                vec![process(42, 1), process(43, 1)],
+                vec![finding(42, 1), finding(43, 1)],
+            )
+        };
+        latest.dismiss(finding(42, 1).id);
+        latest.set_processes(both(T));
+        assert_eq!(alerting_pids(&latest), [43]);
+        assert_eq!(visible_ids(&latest), vec![(43, 1)]);
+
+        latest.set_processes(scan_at(T + 1, vec![process(43, 1)], vec![finding(43, 1)]));
+        latest.set_processes(both(T + 2));
+        assert_eq!(alerting_pids(&latest), [42]);
+        assert_eq!(alert_reasons(&latest), [AlertReason::New]);
+        assert_eq!(visible_ids(&latest), vec![(42, 1), (43, 1)]);
+    }
+
+    #[test]
+    fn alert_activity_leaves_suggestions_unchanged() {
+        let mut latest = LatestSnapshot::default();
+        let input = scan_at(T, vec![process(42, 1)], vec![finding(42, 1)]);
+        let expected = input.suggestions.clone();
+        latest.set_processes(input);
+        assert_eq!(alert_reasons(&latest), [AlertReason::New]);
+        assert_eq!(latest.cached().suggestions, expected);
+        let raw = latest
+            .processes
+            .as_ref()
+            .and_then(|scan| scan.suggestions.clone());
+        assert_eq!(raw, expected);
+    }
+
+    #[test]
+    fn missing_suggestions_leave_previous_alert_events_unchanged() {
+        let mut latest = LatestSnapshot::default();
+        latest.set_processes(scan_at(T, vec![process(42, 1)], vec![finding(42, 1)]));
+        let before = latest.alert_events().to_vec();
+        latest.set_processes(ProcessScan {
+            processes: vec![process(42, 1)],
+            observed_at_ms: T + 5_000,
+            suggestions: None,
+        });
+        assert_eq!(latest.alert_events(), before.as_slice());
+        latest.set_processes(scan_at(
+            T + 10_000,
+            vec![process(42, 1)],
+            vec![finding(42, 1)],
+        ));
+        assert!(latest.alert_events().is_empty());
     }
 }
