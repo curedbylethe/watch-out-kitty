@@ -2,9 +2,23 @@ import ast
 import pathlib
 import types
 import unittest
+from unittest import mock
 
+import probe_tab_bar
 import syswatch_redraw
+from syswatch_cache import TelemetryCache
+from syswatch_client import ClientResult, Memory, Status
 from syswatch_redraw import install_redraw_timer
+
+WALL_MS = 1_700_000_000_000
+STATUS = Status(
+    timestamp_ms=WALL_MS,
+    cpu_usage_percent=12.4,
+    cpu_updated_at_ms=WALL_MS,
+    memory=Memory(total_bytes=8, used_bytes=4),
+    process_count=3,
+    processes_updated_at_ms=WALL_MS,
+)
 
 
 class FakeManager:
@@ -139,6 +153,97 @@ class RedrawTest(unittest.TestCase):
             if isinstance(node, ast.ImportFrom) and node.module
         }
         self.assertFalse(top_level & {"kitty", "socket", "subprocess", "threading"})
+
+
+class FakeScreen:
+    def __init__(self):
+        self.drawn = []
+        self.cursor = types.SimpleNamespace(x=9)
+
+    def draw(self, text):
+        self.drawn.append(text)
+
+
+class FakeCache:
+    def __init__(self, view):
+        self._view = view
+        self.started = 0
+
+    def start(self):
+        self.started += 1
+
+    def view(self):
+        return self._view
+
+
+class ProbeTest(unittest.TestCase):
+    def setUp(self):
+        probe_tab_bar._started = False
+        probe_tab_bar._timer_ok = False
+        probe_tab_bar._cache = None
+        self.screen = FakeScreen()
+        self.installs = []
+        self.cache = FakeCache(TelemetryCache(monotonic_ms=lambda: 0).view())
+        self.patch("get_shared", lambda **kwargs: self.cache)
+        self.patch("install_redraw_timer", self.install)
+
+    def patch(self, name, replacement):
+        patcher = mock.patch.object(probe_tab_bar, name, replacement)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def install(self, view):
+        self.installs.append(view)
+        return False
+
+    def draw(self, is_last):
+        return probe_tab_bar.draw_tab(None, self.screen, None, 3, 10, 1, is_last, None)
+
+    def test_non_last_tab_returns_before_and_draws_nothing(self):
+        self.assertEqual(self.draw(is_last=False), 3)
+        self.assertEqual(self.screen.drawn, [])
+
+    def test_last_tab_draws_placeholder_before_first_refresh(self):
+        self.assertEqual(self.draw(is_last=True), 9)
+        self.assertEqual(self.screen.drawn, ["SW ... E"])
+
+    def test_last_tab_draws_live_values_and_revision(self):
+        cache = TelemetryCache(monotonic_ms=lambda: 0)
+        cache._ingest(
+            "status",
+            ClientResult("available", value=STATUS, age_ms=0),
+            0,
+        )
+        self.cache._view = cache.view()
+        self.draw(is_last=True)
+        self.assertEqual(self.screen.drawn, ["SW r1 12% 50% E"])
+
+    def test_failed_refresh_shows_state_not_stale_numbers(self):
+        cache = TelemetryCache(monotonic_ms=lambda: 0)
+        cache._ingest("status", ClientResult("daemon_unavailable"), 0)
+        self.cache._view = cache.view()
+        self.draw(is_last=True)
+        self.assertEqual(self.screen.drawn, ["SW daemon_unavailable E"])
+
+    def test_timer_is_installed_once_across_draws(self):
+        self.draw(is_last=True)
+        self.draw(is_last=True)
+        self.assertEqual(self.cache.started, 1)
+        self.assertEqual(len(self.installs), 1)
+
+    def test_probe_source_does_no_io_or_config_writes(self):
+        path = pathlib.Path(__file__).with_name("probe_tab_bar.py")
+        source = path.read_text()
+        for forbidden in ("socket", "subprocess", "sleep(", "open(", "request_line", "kitten", "tab_bar_style"):
+            self.assertNotIn(forbidden, source)
+        tree = ast.parse(source)
+        imported = {
+            alias.name.split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        self.assertFalse(imported & {"kitty", "socket", "subprocess", "asyncio", "time"})
 
 
 if __name__ == "__main__":
