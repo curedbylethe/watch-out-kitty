@@ -22,7 +22,6 @@ PROTOCOL_VERSION = 1
 DEFAULT_TIMEOUT_MS = 1000
 MAX_REQUEST_BYTES = 4096
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
-READ_POLL_SECONDS = 0.01
 READ_CHUNK_BYTES = 8192
 READ_COMMANDS = ("status", "suggestions")
 
@@ -85,11 +84,8 @@ def request_line(socket_path, command, timeout_ms=DEFAULT_TIMEOUT_MS):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TransportError("timeout")
-            sock.settimeout(min(remaining, READ_POLL_SECONDS))  # slow-drip guard
-            try:
-                chunk = sock.recv(READ_CHUNK_BYTES)
-            except socket.timeout:
-                continue
+            sock.settimeout(remaining)  # one deadline for the whole reply
+            chunk = sock.recv(READ_CHUNK_BYTES)
             if not chunk:
                 raise TransportError("malformed_response")
             buf += chunk
