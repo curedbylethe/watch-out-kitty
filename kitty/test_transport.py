@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import socket
@@ -8,7 +9,7 @@ import unittest
 from contextlib import contextmanager
 from unittest.mock import patch
 
-from syswatch_client import MAX_RESPONSE_BYTES, TransportError, request_line
+from syswatch_client import MAX_RESPONSE_BYTES, TransportError, read_status, request_line
 
 
 def read_line(conn):
@@ -54,6 +55,28 @@ def fake_daemon(reply=b"", delay=0.0, drip=0.0):
         thread.join(5)
         listener.close()
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+class ReadStatusOverSocketTests(unittest.TestCase):
+    def test_stale_status_is_decoded_end_to_end_over_socket(self):
+        reply = {
+            "kind": "status",
+            "version": 1,
+            "aggregate": {
+                "timestamp_ms": 1_000,
+                "cpu_usage_percent": 1.5,
+                "cpu_updated_at_ms": 1_000,
+                "memory": {"total_bytes": 8, "used_bytes": 4},
+            },
+            "process_count": 2,
+            "processes_updated_at_ms": 1_000,
+        }
+        with fake_daemon(json.dumps(reply).encode() + b"\n") as (path, received):
+            result = read_status(path, timeout_ms=200, now_ms=2_000, max_age_ms=500)
+        self.assertEqual(received, [b'{"version":1,"command":"status"}\n'])
+        self.assertEqual(result.state, "stale")
+        self.assertEqual(result.age_ms, 1_000)
+        self.assertEqual(result.value.cpu_usage_percent, 1.5)
 
 
 class RequestLineTests(unittest.TestCase):
