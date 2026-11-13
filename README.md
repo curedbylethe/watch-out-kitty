@@ -103,6 +103,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-daemon/src/clock.rs` | Interruptible monotonic clock |
 | `crates/syswatch-daemon/src/ipc.rs` | Unix socket server |
 | `crates/syswatch-daemon/src/scheduler.rs` | Independent sampling schedule |
+| `crates/syswatch-daemon/src/dismissal.rs` | Bounded in-memory registry of dismissed advisory findings |
 | `crates/syswatch-daemon/src/latest.rs` | Cached latest snapshot and advisory suggestions |
 | `crates/syswatch-daemon/src/lib.rs` | Daemon lifecycle and server startup |
 | `crates/syswatch-daemon/src/main.rs` | Foreground daemon entry point |
