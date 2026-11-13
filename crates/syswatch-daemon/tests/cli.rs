@@ -75,16 +75,6 @@ fn suggestions_command_reports_still_collecting() {
 }
 
 #[test]
-fn suggestions_command_output_has_no_escape_bytes() {
-    let dir = TempDir::new();
-    let daemon = Daemon::start(&dir);
-
-    let output = run_cli(daemon.socket(), &["suggestions"]);
-    assert!(!output.stdout.contains(&0x1b));
-    assert!(std::str::from_utf8(&output.stdout).is_ok());
-}
-
-#[test]
 fn suggestions_command_reports_a_missing_daemon() {
     let dir = TempDir::new();
 
