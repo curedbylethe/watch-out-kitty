@@ -16,6 +16,8 @@
 //! - [`ActionOutcome::SigtermRequested`] means the signal was requested. It
 //!   does not show that the process exited.
 //! - No state survives a call. There is no retry, escalation, or confirmation.
+//! - [`UnixSignalSender`] is the only sender. It is Unix-only and sends one
+//!   SIGTERM per call, with no retry, escalation, or privilege change.
 
 use crate::findings::FindingId;
 use crate::preflight::{
@@ -181,6 +183,47 @@ pub fn execute(
 
 fn denied(reasons: Vec<ActionDenial>) -> ActionOutcome {
     ActionOutcome::Denied { reasons }
+}
+
+/// Sends SIGTERM to one process with `kill(2)`.
+///
+/// Platform limit: the kernel applies the signal to whichever process holds
+/// the PID when `kill` runs. macOS has no `pidfd`, so a process exit and PID
+/// reuse between the caller's check and the call cannot be detected. This
+/// sender does not claim identity-safe delivery.
+#[cfg(unix)]
+pub struct UnixSignalSender;
+
+#[cfg(unix)]
+impl SignalSender for UnixSignalSender {
+    fn request_stop(&mut self, target: (u32, u64)) -> SignalDelivery {
+        // The start time is not passed to the kernel: `kill(2)` takes a PID only.
+        let (pid, _start_time_secs) = target;
+        let Ok(pid) = libc::pid_t::try_from(pid) else {
+            return SignalDelivery::InvalidTarget;
+        };
+        // Below 2, `kill` signals a process group or every process: refuse first.
+        if pid < 2 {
+            return SignalDelivery::InvalidTarget;
+        }
+        // SAFETY: `kill` is thread-safe and takes no pointers. `pid` is a
+        // positive PID (at least 2), so no process group or broadcast is targeted.
+        let result = unsafe { libc::kill(pid, libc::SIGTERM) };
+        classify_delivery(result, std::io::Error::last_os_error().raw_os_error())
+    }
+}
+
+/// Maps the `kill` return value and errno to one delivery outcome.
+#[cfg(unix)]
+fn classify_delivery(result: libc::c_int, errno: Option<i32>) -> SignalDelivery {
+    if result == 0 {
+        return SignalDelivery::Requested;
+    }
+    match errno {
+        Some(libc::ESRCH) => SignalDelivery::AlreadyExited,
+        Some(libc::EPERM) => SignalDelivery::PermissionDenied,
+        _ => SignalDelivery::Failed,
+    }
 }
 
 #[cfg(test)]
@@ -544,5 +587,40 @@ mod tests {
             ActionOutcome::SigtermRequested
         );
         assert_eq!(sender.calls, vec![(42, 1)]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn classifier_maps_kernel_answer() {
+        assert_eq!(classify_delivery(0, None), SignalDelivery::Requested);
+        assert_eq!(
+            classify_delivery(0, Some(libc::EPERM)),
+            SignalDelivery::Requested
+        );
+        assert_eq!(
+            classify_delivery(-1, Some(libc::ESRCH)),
+            SignalDelivery::AlreadyExited
+        );
+        assert_eq!(
+            classify_delivery(-1, Some(libc::EPERM)),
+            SignalDelivery::PermissionDenied
+        );
+        assert_eq!(
+            classify_delivery(-1, Some(libc::EINVAL)),
+            SignalDelivery::Failed
+        );
+        assert_eq!(classify_delivery(-1, None), SignalDelivery::Failed);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_guard_refuses_before_syscall() {
+        let mut unix = UnixSignalSender;
+        assert_eq!(unix.request_stop((0, 1)), SignalDelivery::InvalidTarget);
+        assert_eq!(unix.request_stop((1, 1)), SignalDelivery::InvalidTarget);
+        assert_eq!(
+            unix.request_stop((u32::MAX, 1)),
+            SignalDelivery::InvalidTarget
+        );
     }
 }
