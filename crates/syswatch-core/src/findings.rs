@@ -124,6 +124,31 @@ impl FindingId {
     pub fn identity(&self) -> (u32, u64) {
         (self.pid, self.start_time_secs)
     }
+
+    /// Canonical terminal form `<pid>-<start_time_secs>-<kind>`, the reference
+    /// `syswatch suggestions` prints and `syswatch inspect` accepts.
+    pub fn reference(&self) -> String {
+        format!("{}-{}-{}", self.pid, self.start_time_secs, self.kind)
+    }
+}
+
+impl std::fmt::Display for FindingKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Cpu => "cpu",
+            Self::Memory => "memory",
+        })
+    }
+}
+
+impl std::fmt::Display for Confidence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        })
+    }
 }
 
 /// Strength of evidence supporting a finding.
@@ -300,6 +325,44 @@ mod tests {
             serde_json::to_string(&finding).unwrap(),
             r#"{"id":{"pid":42,"start_time_secs":1700000000,"kind":"cpu"},"confidence":"medium","observed_at_ms":1700000000123,"explanation":"pid 42 (worker) used CPU continuously over the retained window","evidence":{"sample_count":0,"span_ms":0,"cpu":null,"memory":null}}"#
         );
+    }
+
+    #[test]
+    fn reference_is_stable() {
+        let id = |kind| FindingId {
+            pid: 42,
+            start_time_secs: 1_700_000_000,
+            kind,
+        };
+        assert_eq!(id(FindingKind::Memory).reference(), "42-1700000000-memory");
+        assert_eq!(id(FindingKind::Cpu).reference(), "42-1700000000-cpu");
+    }
+
+    #[test]
+    fn reference_separates_pid_reuse() {
+        let at = |pid, start, kind| FindingId {
+            pid,
+            start_time_secs: start,
+            kind,
+        };
+        let memory = FindingKind::Memory;
+        assert_ne!(at(42, 1, memory).reference(), at(42, 2, memory).reference());
+        assert_ne!(
+            at(42, 1, memory).reference(),
+            at(42, 1, FindingKind::Cpu).reference()
+        );
+    }
+
+    #[test]
+    fn kind_and_confidence_display_matches_wire_names() {
+        for kind in [FindingKind::Cpu, FindingKind::Memory] {
+            let wire = serde_json::to_string(&kind).unwrap();
+            assert_eq!(kind.to_string(), wire.trim_matches('"'));
+        }
+        for confidence in [Confidence::Low, Confidence::Medium, Confidence::High] {
+            let wire = serde_json::to_string(&confidence).unwrap();
+            assert_eq!(confidence.to_string(), wire.trim_matches('"'));
+        }
     }
 
     #[test]
