@@ -59,7 +59,7 @@ request line per connection; the server closes the connection after its reply.
 
 This repository contains the telemetry crate, snapshot example, foreground
 daemon, and `syswatch status`, `syswatch top`, `syswatch suggestions`, and `syswatch inspect`
-commands. The daemon evaluates advisory findings on process-sampling ticks,
+commands, and the core exposes a dry-run process-action preflight that no command uses yet. The daemon evaluates advisory findings on process-sampling ticks,
 caches them separately from aggregate telemetry, and serves them through the
 read-only `suggestions` request. No Kitty indicator shows them yet. A background
 service is planned. See the
@@ -74,7 +74,7 @@ The workspace uses Rust edition 2024. From the repository root:
 ```sh
 cargo build --workspace
 cargo test --workspace
-cargo fmt --all --check
+cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
@@ -96,6 +96,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-core/src/lib.rs` | Public core modules and exports |
 | `crates/syswatch-core/src/snapshot.rs` | CPU, memory, and process data types |
 | `crates/syswatch-core/src/report.rs` | Human-readable formatting |
+| `crates/syswatch-core/src/preflight.rs` | Dry-run process-action assessment and preview |
 | `crates/syswatch-core/src/protocol.rs` | Versioned read-only monitoring protocol |
 | `crates/syswatch-core/examples/snapshot.rs` | One-time snapshot example |
 | `crates/syswatch-daemon` | Foreground monitoring daemon |
@@ -186,6 +187,25 @@ process is detached. A zero start time is always `Unknown`, regardless of owner
 or ancestry evidence, because its identity cannot be verified.
 A process's own program label counts as terminal evidence, reported separately
 from ancestor evidence; missing ancestry is not evidence of detachment.
+
+### Process-action preflight
+
+A preflight assesses one requested process action. It takes the full finding
+identity, a fresh process scan with provenance, the current time, and the
+caller's maximum observation age. It returns one of three outcomes: allowed for
+confirmation, denied, or needs fresh evidence. A zero start time, a missing or
+reused identity, and every protected, monitor, terminal, ownership, or
+incomplete-evidence result denies.
+
+Passing preflight is not permission. It means only that a later confirmation
+step may be offered. The preflight sends no signal, and the crate still does
+not terminate processes. A separate explicit confirmation step is mandatory
+before any automated termination. The preflight performs no lookup of its own
+and adds no request or reply, so protocol version `1` is unchanged.
+
+The preview prints the same finding reference that `suggestions` and `inspect`
+use, described above, and states that nothing was executed. No command uses
+preflight yet.
 
 ## Protocol
 

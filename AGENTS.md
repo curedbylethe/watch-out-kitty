@@ -7,7 +7,7 @@ The Rust 2024 workspace contains `crates/syswatch-core` for telemetry,
 process-ranking, and advisory findings output. The core exposes system collection, bounded process
 history, socket path resolution, snapshot data types, text reporting, and
 advisory findings and eligibility through `src/collector.rs`, `src/detector.rs`, `src/findings.rs`,
-`src/eligibility.rs`, `src/history.rs`, `src/ipc.rs`, `src/snapshot.rs`, and
+`src/eligibility.rs`, `src/history.rs`, `src/ipc.rs`, `src/preflight.rs`, `src/snapshot.rs`, and
 `src/report.rs`.
 The CLI modules are `src/args.rs`, `src/client.rs`, `src/output.rs`, and `src/main.rs`.
 The core's `examples/snapshot.rs` prints one diagnostic snapshot. See `README.md`
@@ -68,7 +68,9 @@ authorize a process action. The eligibility assessment decides only whether a
 process may be considered by a later advisory rule. It reads no CPU, memory,
 or lifetime signal, and unknown terminal association does not mean detached.
 A zero start time is insufficient identity for advice; `Unknown` there is not
-evidence that the process is abandoned.
+evidence that the process is abandoned. A preflight assessment decides only
+whether a later confirmation may be offered; it sends no signal and is never
+permission to act.
 
 ## Change discipline
 
