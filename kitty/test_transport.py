@@ -23,8 +23,11 @@ def read_line(conn):
 
 
 @contextmanager
-def fake_daemon(reply=b"", delay=0.0, drip=0.0):
-    """Accept one connection, record its request, then answer as configured."""
+def fake_daemon(reply=b"", delay=0.0, drip=0.0, trickle=None):
+    """Accept one connection, record its request, then answer as configured.
+
+    `trickle` is (seconds, bytes): send those bytes after that wait, before `delay`.
+    """
     tmp = tempfile.mkdtemp()
     path = os.path.join(tmp, "s")
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -37,6 +40,9 @@ def fake_daemon(reply=b"", delay=0.0, drip=0.0):
             conn, _ = listener.accept()
             with conn:
                 received.append(read_line(conn))
+                if trickle:
+                    time.sleep(trickle[0])
+                    conn.sendall(trickle[1])
                 time.sleep(delay)
                 if drip:
                     for byte in reply:
@@ -131,6 +137,16 @@ class RequestLineTests(unittest.TestCase):
             with self.assertRaises(TransportError) as ctx:
                 request_line(path, "status", timeout_ms=60)
         self.assertEqual(ctx.exception.reason, "timeout")
+
+    def test_stalled_read_stops_at_the_shared_deadline(self):
+        # One byte at 250 ms, then a stall; the budget is 300 ms from the start.
+        with fake_daemon(delay=0.6, trickle=(0.25, b"{")) as (path, _):
+            start = time.monotonic()
+            with self.assertRaises(TransportError) as ctx:
+                request_line(path, "status", timeout_ms=300)
+            elapsed = time.monotonic() - start
+        self.assertEqual(ctx.exception.reason, "timeout")
+        self.assertLess(elapsed, 0.45)  # full-timeout-per-read would take ~0.55 s
 
     def test_missing_socket_is_daemon_unavailable(self):
         with tempfile.TemporaryDirectory() as tmp:
