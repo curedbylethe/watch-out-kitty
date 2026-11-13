@@ -111,7 +111,7 @@ pub fn render_suggestions(
                 ));
                 lines.push(format!(
                     "  {}",
-                    report::sanitize_field(&finding.explanation, 100)
+                    report::sanitize_field(&finding.explanation, 160)
                 ));
             }
             if findings.is_empty() {
@@ -485,8 +485,44 @@ mod tests {
             lines[0],
             format!("42-1-cpu  low  a\u{fffd}{}", "x".repeat(22))
         );
-        assert_eq!(lines[1].chars().count(), 2 + 100);
+        assert_eq!(lines[1].chars().count(), 2 + 160);
         assert!(!rendered.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn render_suggestions_keeps_closing_advice_of_real_explanation() {
+        // Same shape as the detector's memory explanation (detector.rs format string).
+        let explanation = "pid 4294967295 held 9999 MiB of memory while using at most 100.0% CPU across 9999 samples over 9999 s; review this process";
+        let response = suggestions(vec![finding(
+            42,
+            FindingKind::Memory,
+            Confidence::Medium,
+            explanation,
+        )]);
+        let rendered = render_suggestions(&response, None, NOW).unwrap();
+        assert_eq!(
+            rendered.lines().nth(1),
+            Some(format!("  {explanation}").as_str())
+        );
+    }
+
+    #[test]
+    fn render_suggestions_keeps_stale_findings_and_reports_their_age() {
+        let response = Response::Suggestions {
+            version: PROTOCOL_VERSION,
+            evaluated_at_ms: NOW - 600_000,
+            processes_updated_at_ms: NOW - 600_000,
+            findings: vec![finding(
+                42,
+                FindingKind::Memory,
+                Confidence::Medium,
+                "pid 42 held 256 MiB",
+            )],
+        };
+        let names = processes(vec![process(42, "worker", 1, 0.0)]);
+        let rendered = render_suggestions(&response, Some(&names), NOW).unwrap();
+        assert!(rendered.starts_with("42-1-memory  medium  worker\n"));
+        assert!(rendered.ends_with("findings evaluated 600.0s ago; process data: 600.0 s old"));
     }
 
     #[test]
