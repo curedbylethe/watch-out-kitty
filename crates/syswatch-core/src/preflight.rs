@@ -49,8 +49,8 @@ pub struct PreflightObservation<'a> {
     pub provenance: &'a BTreeMap<(u32, u64), ProcessProvenance>,
     /// When the scan was taken, in milliseconds.
     pub observed_at_ms: u64,
-    /// Identity of the monitor process, as the caller knows it. `None` when unknown.
-    pub monitor: Option<(u32, u64)>,
+    /// Identity of the monitor process. Required, so monitor protection cannot be silently off.
+    pub monitor: (u32, u64),
 }
 
 /// Outcome of a preflight assessment.
@@ -165,7 +165,7 @@ fn decide(
     let assessment = eligibility::assess(
         finding.identity(),
         observation.provenance,
-        observation.monitor,
+        Some(observation.monitor),
     );
     match assessment.state {
         EligibilityState::Eligible => (PreflightConclusion::AllowedForConfirmation, Vec::new()),
@@ -248,6 +248,8 @@ mod tests {
     const NOW_MS: u64 = 10_000;
     const OBSERVED_MS: u64 = 9_000;
     const MAX_AGE_MS: u64 = 5_000;
+    /// A monitor identity no test process uses.
+    const MONITOR: (u32, u64) = (9_999, 9_999);
 
     fn finding(pid: u32, start_time_secs: u64) -> FindingId {
         FindingId {
@@ -320,7 +322,7 @@ mod tests {
             processes,
             provenance: &provenance,
             observed_at_ms,
-            monitor: None,
+            monitor: MONITOR,
         };
         assess_with(target, Some(&observation))
     }
@@ -329,7 +331,7 @@ mod tests {
     fn assess_monitored(
         processes: &[ProcessSnapshot],
         rows: Vec<ProcessProvenance>,
-        monitor: Option<(u32, u64)>,
+        monitor: (u32, u64),
     ) -> PreflightAssessment {
         let provenance = scan(rows);
         let observation = PreflightObservation {
@@ -465,7 +467,7 @@ mod tests {
         let result = assess_monitored(
             &[process(42, 1)],
             vec![provenance(42, 1, Some(501), ParentContext::NoParent, None)],
-            Some((42, 1)),
+            (42, 1),
         );
         assert_eq!(result.conclusion, PreflightConclusion::Denied);
         assert_eq!(
@@ -493,7 +495,7 @@ mod tests {
                 ),
                 provenance(99, 7, Some(501), ParentContext::NoParent, None),
             ],
-            Some((99, 7)),
+            (99, 7),
         );
         assert_eq!(result.conclusion, PreflightConclusion::Denied);
         assert_eq!(
@@ -697,7 +699,7 @@ mod tests {
             processes: &processes,
             provenance: &provenance_map,
             observed_at_ms: OBSERVED_MS,
-            monitor: None,
+            monitor: MONITOR,
         };
         let first = assess(&request(finding(42, 1)), Some(&observation));
         let second = assess(&request(finding(42, 1)), Some(&observation));
