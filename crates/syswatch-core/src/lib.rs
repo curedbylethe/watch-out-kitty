@@ -8,6 +8,7 @@ pub mod findings;
 pub mod history;
 #[cfg(unix)]
 pub mod ipc;
+pub mod preflight;
 pub mod protocol;
 pub mod provenance;
 pub mod report;
@@ -24,6 +25,10 @@ pub use findings::{
     MemoryActivity, SuggestionsSnapshot,
 };
 pub use history::{HistoryLimits, ProcessHistory, ProcessObservation, ProcessRecord};
+pub use preflight::{
+    PreflightAssessment, PreflightConclusion, PreflightObservation, PreflightReason,
+    PreflightRequest, RequestedAction,
+};
 pub use snapshot::{AggregateSnapshot, MemorySnapshot, ProcessSnapshot, SystemSnapshot};
 
 #[cfg(test)]
