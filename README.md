@@ -98,6 +98,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-core/src/report.rs` | Human-readable formatting |
 | `crates/syswatch-core/src/preflight.rs` | Dry-run process-action assessment and preview |
 | `crates/syswatch-core/src/action.rs` | Typed action service; requests one SIGTERM after a fresh allowed preflight |
+| `crates/syswatch-core/src/alerts.rs` | Alert eligibility policy with a fixed cooldown |
 | `crates/syswatch-core/src/protocol.rs` | Versioned read-only monitoring protocol |
 | `crates/syswatch-core/examples/snapshot.rs` | One-time snapshot example |
 | `crates/syswatch-daemon` | Foreground monitoring daemon |

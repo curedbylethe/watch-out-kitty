@@ -1,6 +1,7 @@
 //! Core types and logic for syswatch.
 
 pub mod action;
+pub mod alerts;
 pub mod collector;
 pub mod config;
 pub mod detector;
@@ -19,6 +20,7 @@ pub use action::UnixSignalSender;
 pub use action::{
     ActionDenial, ActionFailure, ActionOutcome, ActionRequest, SignalDelivery, SignalSender,
 };
+pub use alerts::{AlertEvent, AlertPolicy, AlertReason, DEFAULT_ALERT_COOLDOWN_MS};
 pub use collector::Collector;
 pub use config::{ConfigError, MonitoringConfig};
 pub use detector::{DetectorConfig, IdleMemoryCandidate};
