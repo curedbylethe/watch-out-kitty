@@ -16,6 +16,7 @@ cargo run -p syswatch-daemon
 cargo run -p syswatch-cli -- status
 cargo run -p syswatch-cli -- top
 cargo run -p syswatch-cli -- suggestions
+cargo run -p syswatch-cli -- inspect 42-1700000000-memory
 ```
 
 The example prints one snapshot of aggregate CPU, physical memory, and the
@@ -40,6 +41,11 @@ prints `(no current suggestions)`. Both exit with status 0. Daemon and IPC
 failures exit with status 1, and invalid arguments exit with status 2. The command
 offers no process action; a finding invites inspection.
 
+`syswatch inspect <reference>` prints the cached evidence for one finding, selected by its full
+reference `<pid>-<start_time_secs>-<kind>`. It exits with status 1 when the daemon is unavailable or
+the finding is no longer cached, and with status 2 for a malformed reference. It reads cached replies
+only and never scans processes.
+
 ### Daemon socket
 
 The daemon socket path is `$SYSWATCH_SOCKET` when set to an absolute path,
@@ -52,7 +58,7 @@ request line per connection; the server closes the connection after its reply.
 ## Current scope
 
 This repository contains the telemetry crate, snapshot example, foreground
-daemon, and `syswatch status`, `syswatch top`, and `syswatch suggestions`
+daemon, and `syswatch status`, `syswatch top`, `syswatch suggestions`, and `syswatch inspect`
 commands. The daemon evaluates advisory findings on process-sampling ticks,
 caches them separately from aggregate telemetry, and serves them through the
 read-only `suggestions` request. No Kitty indicator shows them yet. A background
@@ -102,11 +108,11 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-daemon/src/sampler.rs` | Collector, process history, and advisory evaluation |
 | `crates/syswatch-daemon/src/signals.rs` | SIGINT and SIGTERM handling |
 | `crates/syswatch-daemon/tests` | End-to-end daemon and socket tests |
-| `crates/syswatch-cli` | Status, process-ranking, and advisory findings command-line client |
+| `crates/syswatch-cli` | Status, process-ranking, and advisory-inspection command-line client |
 | `crates/syswatch-cli/src/args.rs` | Command-line argument parsing |
 | `crates/syswatch-cli/src/client.rs` | Daemon IPC client |
 | `crates/syswatch-cli/src/main.rs` | Command dispatch and process entry point |
-| `crates/syswatch-cli/src/output.rs` | Status and process report rendering |
+| `crates/syswatch-cli/src/output.rs` | Status, process, and advisory report rendering |
 | `.github/workflows/ci.yml` | Ubuntu build checks |
 | `LICENSE` | Apache-2.0 license |
 
@@ -145,6 +151,11 @@ more retained observations lack a valid measurement. High means every retained
 observation has a valid measurement and at least two observations are retained.
 Confidence does not say whether a process is stale, safe, or safe to terminate.
 A finding invites inspection.
+
+A finding reference is `<pid>-<start_time_secs>-<kind>`. It names the same `(pid, start_time_secs)`
+identity the rest of the tool uses, so a reference cannot select a process whose PID was reused.
+`syswatch inspect` matches all three fields. A reference absent from the current reply is reported
+as not found and may have expired.
 
 The detector considers eligible processes holding at least 256 MiB, with CPU
 usage at or below 1.0% across at least six valid samples spanning at least
@@ -192,6 +203,9 @@ required fields, field meanings, or command behavior require a version bump.
 The `suggestions` operation is additive, so the version remains `1`: existing
 fields and command behavior are unchanged, older servers reply
 `unsupported_command`, and older clients never send the request.
+
+`syswatch inspect` reads the same cached reply and adds no request type; a finding reference is not a
+wire field and adds nothing to the reply.
 
 The three read-only requests and example replies:
 
