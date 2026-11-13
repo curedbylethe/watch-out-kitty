@@ -153,6 +153,10 @@ fn run_close(reference: syswatch_core::findings::FindingId) -> i32 {
     }
 
     println!();
+    println!(
+        "Review the evidence first: syswatch inspect {}",
+        reference.reference()
+    );
     print!(
         "Type yes to request SIGTERM for {}: ",
         reference.reference()
@@ -161,6 +165,10 @@ fn run_close(reference: syswatch_core::findings::FindingId) -> i32 {
     let mut line = String::new();
     let read = std::io::stdin().lock().read_line(&mut line);
     if !(matches!(read, Ok(bytes) if bytes > 0) && confirmed(&line)) {
+        // End of input leaves the prompt without a line break.
+        if matches!(read, Ok(0)) {
+            println!();
+        }
         println!("aborted: no action was requested");
         return 1;
     }
@@ -183,6 +191,10 @@ fn run_close(reference: syswatch_core::findings::FindingId) -> i32 {
         },
         Err(error) => {
             eprintln!("syswatch: {error}");
+            eprintln!(
+                "syswatch: the daemon may have received the request; run `syswatch inspect {}` to check",
+                reference.reference()
+            );
             1
         }
     }

@@ -67,7 +67,7 @@ request line per connection; the server closes the connection after its reply.
 This repository contains the telemetry crate, snapshot example, foreground
 daemon, and `syswatch status`, `syswatch top`, `syswatch suggestions`, `syswatch inspect`,
 and `syswatch close`
-commands, and `syswatch close`, the only command that can request a process action. The daemon evaluates advisory findings on process-sampling ticks,
+commands. `syswatch close` is the only command that can request a process action. The daemon evaluates advisory findings on process-sampling ticks,
 caches them separately from aggregate telemetry, and serves them through the
 read-only `suggestions` request. No Kitty indicator shows them yet. A background
 service is planned. See the

@@ -203,7 +203,6 @@ pub fn render_inspect(
     ))
 }
 
-/// Empty suffix for exactly one item, `s` otherwise.
 /// Renders the labelled preview for one close request. Nothing was executed.
 pub fn render_close_preview(response: &Response) -> Result<String, String> {
     match response {
@@ -286,6 +285,7 @@ fn failure_text(failure: ActionFailure) -> &'static str {
     }
 }
 
+/// Empty suffix for exactly one item, `s` otherwise.
 fn plural(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
 }
