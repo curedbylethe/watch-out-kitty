@@ -1,5 +1,7 @@
 use syswatch_core::{
+    action::{ActionDenial, ActionFailure, ActionOutcome},
     findings::{self, FindingId},
+    preflight,
     protocol::{ErrorCode, Response},
     report::{self, ProcessSort, format_bytes, format_cpu_percent},
 };
@@ -202,6 +204,88 @@ pub fn render_inspect(
 }
 
 /// Empty suffix for exactly one item, `s` otherwise.
+/// Renders the labelled preview for one close request. Nothing was executed.
+pub fn render_close_preview(response: &Response) -> Result<String, String> {
+    match response {
+        Response::ClosePreview {
+            assessment,
+            process,
+            ..
+        } => Ok(format!(
+            "Action preview\n{}",
+            preflight::preview(assessment, process.as_ref())
+        )),
+        Response::Error { code, message, .. } => {
+            Err(format!("daemon error ({}): {message}", error_code(code)))
+        }
+        _ => Err("invalid response from daemon: expected close preview response".to_owned()),
+    }
+}
+
+/// Renders a close confirmation and its exit code. Only a requested SIGTERM
+/// exits 0; the text never claims the process exited.
+pub fn render_close_outcome(
+    response: &Response,
+    reference: FindingId,
+) -> Result<(String, i32), String> {
+    let outcome = match response {
+        Response::CloseResult { outcome, .. } => outcome,
+        Response::Error { code, message, .. } => {
+            return Err(format!("daemon error ({}): {message}", error_code(code)));
+        }
+        _ => return Err("invalid response from daemon: expected close result response".to_owned()),
+    };
+    let reference = reference.reference();
+    Ok(match outcome {
+        ActionOutcome::SigtermRequested => (
+            format!(
+                "signal requested: SIGTERM\nprocess: {reference}\nThe daemon accepted the request. This is not confirmation that the process exited.\nRun `syswatch inspect {reference}` to check again."
+            ),
+            0,
+        ),
+        ActionOutcome::AlreadyExited => (
+            "no signal sent: the process already exited\nNo signal was requested.".to_owned(),
+            1,
+        ),
+        ActionOutcome::Denied { reasons } => {
+            let mut lines = vec!["action denied: no signal was sent".to_owned()];
+            lines.extend(
+                reasons
+                    .iter()
+                    .map(|reason| format!("reason: {}", denial_text(reason))),
+            );
+            (lines.join("\n"), 1)
+        }
+        ActionOutcome::Failed { failure } => (
+            format!(
+                "action failed: no signal was confirmed\nreason: {}",
+                failure_text(*failure)
+            ),
+            1,
+        ),
+        _ => ("action failed: no signal was confirmed".to_owned(), 1),
+    })
+}
+
+fn denial_text(reason: &ActionDenial) -> String {
+    match reason {
+        ActionDenial::Preflight(reason) => preflight::reason_text(reason),
+        ActionDenial::PreflightNotAllowed => "preflight did not allow the action".to_owned(),
+        ActionDenial::PreflightTooOld => "preflight evidence is too old".to_owned(),
+        ActionDenial::PreflightMismatch => "preflight was for another finding".to_owned(),
+        ActionDenial::OwnerMismatch => "process is not owned by the current user".to_owned(),
+        _ => "action refused".to_owned(),
+    }
+}
+
+fn failure_text(failure: ActionFailure) -> &'static str {
+    match failure {
+        ActionFailure::PermissionDenied => "permission denied",
+        ActionFailure::InvalidTarget => "invalid target",
+        _ => "delivery failed",
+    }
+}
+
 fn plural(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
 }
@@ -222,17 +306,51 @@ pub fn format_age_ms(now_ms: u64, then_ms: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_age_ms, render_inspect, render_status, render_suggestions, render_top};
+    use super::{
+        format_age_ms, render_close_outcome, render_close_preview, render_inspect, render_status,
+        render_suggestions, render_top,
+    };
     use syswatch_core::{
         MemorySnapshot,
+        action::{ActionDenial, ActionFailure, ActionOutcome},
         findings::{
             AdvisoryFinding, Confidence, CpuActivity, FindingEvidence, FindingId, FindingKind,
             MemoryActivity,
         },
+        preflight::{PreflightAssessment, PreflightConclusion, PreflightReason, RequestedAction},
         protocol::{ErrorCode, PROTOCOL_VERSION, ProtocolError, Response},
         report::ProcessSort,
         snapshot::{AggregateSnapshot, ProcessSnapshot},
     };
+
+    fn close_finding() -> FindingId {
+        FindingId {
+            pid: 42,
+            start_time_secs: 1,
+            kind: FindingKind::Cpu,
+        }
+    }
+
+    fn close_assessment(
+        conclusion: PreflightConclusion,
+        reasons: Vec<PreflightReason>,
+    ) -> PreflightAssessment {
+        PreflightAssessment {
+            finding: close_finding(),
+            action: RequestedAction::Close,
+            conclusion,
+            reasons,
+            owner_uid: Some(501),
+            observation_age_ms: Some(250),
+        }
+    }
+
+    fn close_result(outcome: ActionOutcome) -> Response {
+        Response::CloseResult {
+            version: PROTOCOL_VERSION,
+            outcome,
+        }
+    }
 
     fn process(pid: u32, name: &str, memory_bytes: u64, cpu_usage_percent: f32) -> ProcessSnapshot {
         ProcessSnapshot {
@@ -776,5 +894,96 @@ mod tests {
         for word in ["safe", "kill", "terminate", "signal", "stale", "orphan"] {
             assert!(!rendered.contains(word), "{word} in {rendered}");
         }
+    }
+
+    #[test]
+    fn close_preview_labels_the_allowed_block_and_asks_for_confirmation() {
+        let response = Response::ClosePreview {
+            version: PROTOCOL_VERSION,
+            assessment: close_assessment(PreflightConclusion::AllowedForConfirmation, vec![]),
+            process: Some(process(42, "worker", 0, 0.0)),
+        };
+        assert_eq!(
+            render_close_preview(&response).unwrap(),
+            "Action preview\nprocess: 42-1-cpu (worker)\nowner uid: 501\naction: close\nverdict: allowed for confirmation\nobservation age: 250 ms\nnothing was executed; no signal was sent\na separate explicit confirmation is required before any action"
+        );
+    }
+
+    #[test]
+    fn close_preview_of_a_stale_assessment_states_the_reason_without_confirmation() {
+        let response = Response::ClosePreview {
+            version: PROTOCOL_VERSION,
+            assessment: close_assessment(
+                PreflightConclusion::NeedsFreshEvidence,
+                vec![PreflightReason::StaleObservation],
+            ),
+            process: None,
+        };
+        assert_eq!(
+            render_close_preview(&response).unwrap(),
+            "Action preview\nprocess: 42-1-cpu (<unknown>)\nowner uid: 501\naction: close\nverdict: needs fresh evidence\nreason: observation is older than the allowed age\nobservation age: 250 ms\nnothing was executed; no signal was sent"
+        );
+    }
+
+    #[test]
+    fn close_sigterm_request_is_exit_zero_and_not_a_confirmed_exit() {
+        let (text, code) = render_close_outcome(
+            &close_result(ActionOutcome::SigtermRequested),
+            close_finding(),
+        )
+        .unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(
+            text,
+            "signal requested: SIGTERM\nprocess: 42-1-cpu\nThe daemon accepted the request. This is not confirmation that the process exited.\nRun `syswatch inspect 42-1-cpu` to check again."
+        );
+    }
+
+    #[test]
+    fn close_already_exited_and_denied_and_failed_are_exit_one() {
+        let (text, code) =
+            render_close_outcome(&close_result(ActionOutcome::AlreadyExited), close_finding())
+                .unwrap();
+        assert_eq!(code, 1);
+        assert_eq!(
+            text,
+            "no signal sent: the process already exited\nNo signal was requested."
+        );
+
+        let denied = close_result(ActionOutcome::Denied {
+            reasons: vec![ActionDenial::PreflightTooOld, ActionDenial::OwnerMismatch],
+        });
+        let (text, code) = render_close_outcome(&denied, close_finding()).unwrap();
+        assert_eq!(code, 1);
+        assert_eq!(
+            text,
+            "action denied: no signal was sent\nreason: preflight evidence is too old\nreason: process is not owned by the current user"
+        );
+
+        let failed = close_result(ActionOutcome::Failed {
+            failure: ActionFailure::PermissionDenied,
+        });
+        let (text, code) = render_close_outcome(&failed, close_finding()).unwrap();
+        assert_eq!(code, 1);
+        assert_eq!(
+            text,
+            "action failed: no signal was confirmed\nreason: permission denied"
+        );
+    }
+
+    #[test]
+    fn close_daemon_errors_are_reported_not_rendered() {
+        let error = Response::error(ProtocolError {
+            code: ErrorCode::NotFound,
+            message: "finding 42-1-cpu is not among the current advisory findings".into(),
+        });
+        assert_eq!(
+            render_close_outcome(&error, close_finding()).unwrap_err(),
+            "daemon error (not_found): finding 42-1-cpu is not among the current advisory findings"
+        );
+        assert_eq!(
+            render_close_preview(&error).unwrap_err(),
+            "daemon error (not_found): finding 42-1-cpu is not among the current advisory findings"
+        );
     }
 }
