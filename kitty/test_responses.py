@@ -122,6 +122,12 @@ class StatusDecodingTests(unittest.TestCase):
     def test_truncated_json_is_malformed(self):
         self.assertEqual(run(b'{"kind":"status"').state, "malformed_response")
 
+    def test_deep_nesting_and_huge_integers_are_malformed(self):
+        huge = json.dumps(status_body()).replace("12.5", "1" + "0" * 400)
+        for body in (b"[" * 200_000, huge.encode()):
+            with self.subTest(body=body[:20]):
+                self.assertEqual(run(body).state, "malformed_response")
+
 
 class SuggestionsDecodingTests(unittest.TestCase):
     def test_clean_empty_suggestions_are_available(self):

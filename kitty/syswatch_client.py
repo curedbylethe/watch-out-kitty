@@ -309,7 +309,7 @@ def _decode_reply(body, command, decode, now_ms, max_age_ms):
         if kind != command:
             raise _Malformed
         value, primary_ms = decode(obj)
-    except (ValueError, KeyError, _Malformed):  # json errors are ValueError
+    except (ValueError, KeyError, _Malformed, RecursionError, OverflowError):  # json errors are ValueError
         return ClientResult("malformed_response")
     age = timestamp_age_ms(now_ms, primary_ms)
     stale = max_age_ms is not None and age > max_age_ms
