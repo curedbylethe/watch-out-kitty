@@ -142,6 +142,8 @@ Run its suite from the repository root with the command in [Development](#develo
 | `crates/syswatch-cli/src/client.rs` | Daemon IPC client |
 | `crates/syswatch-cli/src/main.rs` | Command dispatch and process entry point |
 | `crates/syswatch-cli/src/output.rs` | Status, process, and advisory report rendering |
+| `kitty/syswatch_client.py` | Read-only Python client for cached status and suggestions |
+| `kitty/test_*.py` | Python client tests (`unittest`) |
 | `.github/workflows/ci.yml` | Ubuntu build checks |
 | `LICENSE` | Apache-2.0 license |
 
