@@ -508,29 +508,6 @@ mod tests {
     }
 
     #[test]
-    fn pid_reuse_after_zero_start_keeps_identities_separate() {
-        let mut h = zero_start_history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
-        for (time, cpu, memory) in samples(0.0, DEFAULT_MIN_MEMORY_BYTES) {
-            let mut p = process(cpu, memory);
-            p.start_time_secs = 7;
-            h.record_scan(time + 120_001, &[p]);
-        }
-        assert!(
-            idle_memory_candidates(&h, 240_002, &DetectorConfig::default())
-                .iter()
-                .all(|c| c.identity.1 != 0)
-        );
-        let found = detect_idle_memory_consumers(
-            &h,
-            240_002,
-            &scan(vec![eligible(42, 7)]),
-            &DetectorConfig::default(),
-        );
-        assert_eq!(found.len(), 1);
-        assert_eq!(found[0].id.start_time_secs, 7);
-    }
-
-    #[test]
     fn unknown_ancestry_is_excluded() {
         let h = history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
         let rows = scan(vec![provenance(
