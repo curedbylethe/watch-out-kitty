@@ -3,6 +3,9 @@
 //! This assessment does not infer abandonment from parent PID 1, CPU, or
 //! lifetime. `TerminalAssociation::NotObserved` means evidence was unavailable,
 //! not that the process lacks a terminal.
+//!
+//! A zero start time is not a verifiable identity, so it is always `Unknown`.
+//! A matching PID or program label does not make an identity verifiable.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -65,6 +68,8 @@ pub enum EligibilityReason {
     ActiveTerminal,
     /// The assessed identity was absent from the scan.
     ProvenanceUnavailable,
+    /// The assessed identity has a zero start time, so it cannot be verified.
+    UnverifiableIdentity,
     /// The process owner UID was unavailable.
     OwnerUnknown,
     /// A parent identity could not be validated in the scan.
@@ -131,6 +136,10 @@ pub struct EligibilityAssessment {
 }
 
 /// Assesses one identity using only provenance from the latest scan.
+///
+/// A zero start time is `Unknown` regardless of owner or ancestry, because
+/// PID reuse makes it unverifiable; a matching PID or program label does not
+/// validate it.
 pub fn assess(
     identity: (u32, u64),
     scan: &BTreeMap<(u32, u64), ProcessProvenance>,
@@ -146,6 +155,16 @@ pub fn assess(
             terminal: TerminalAssociation::NotObserved,
         };
     };
+    if identity.1 == 0 {
+        return EligibilityAssessment {
+            identity,
+            state: EligibilityState::Unknown,
+            reasons: vec![EligibilityReason::UnverifiableIdentity],
+            owner_uid: None,
+            ancestry: None,
+            terminal: TerminalAssociation::NotObserved,
+        };
+    }
 
     let owner_uid = process.owner_uid;
     let mut visited = BTreeSet::from([identity]);
@@ -316,6 +335,49 @@ mod tests {
         );
         assert_eq!(result.owner_uid, None);
         assert_eq!(result.ancestry, None);
+    }
+
+    #[test]
+    fn zero_start_identity_is_unknown() {
+        let row = provenance(42, 0, ParentContext::NoParent, Some("worker"), Some(501));
+        let result = assess(row.identity(), &scan(vec![row]), None);
+        assert_eq!(result.state, EligibilityState::Unknown);
+        assert_eq!(
+            result.reasons,
+            vec![EligibilityReason::UnverifiableIdentity]
+        );
+        assert_eq!(result.owner_uid, None);
+        assert_eq!(result.ancestry, None);
+        assert_eq!(result.terminal, TerminalAssociation::NotObserved);
+    }
+
+    #[test]
+    fn zero_start_identity_outranks_protected_evidence() {
+        let parent = provenance(7, 9, ParentContext::NoParent, Some("zsh"), Some(0));
+        let row = provenance(42, 0, resolved(7, 9), Some("worker"), Some(0));
+        let result = assess(row.identity(), &scan(vec![parent, row]), Some((42, 0)));
+        assert_eq!(result.state, EligibilityState::Unknown);
+        assert_eq!(
+            result.reasons,
+            vec![EligibilityReason::UnverifiableIdentity]
+        );
+    }
+
+    #[test]
+    fn pid_and_program_match_do_not_validate_zero_start() {
+        let zero = provenance(42, 0, ParentContext::NoParent, Some("worker"), Some(501));
+        let nonzero = provenance(42, 7, ParentContext::NoParent, Some("worker"), Some(501));
+        let rows = scan(vec![zero, nonzero]);
+        let unverified = assess((42, 0), &rows, None);
+        assert_eq!(unverified.state, EligibilityState::Unknown);
+        assert_eq!(
+            unverified.reasons,
+            vec![EligibilityReason::UnverifiableIdentity]
+        );
+        assert_eq!(
+            assess((42, 7), &rows, None).state,
+            EligibilityState::Eligible
+        );
     }
 
     #[test]
