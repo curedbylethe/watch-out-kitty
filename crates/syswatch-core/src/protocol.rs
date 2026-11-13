@@ -6,7 +6,9 @@
 use serde::de::IntoDeserializer;
 use serde::{Deserialize, Serialize};
 
-use crate::findings::{self, AdvisoryFinding, SuggestionsSnapshot};
+use crate::action::ActionOutcome;
+use crate::findings::{self, AdvisoryFinding, FindingId, SuggestionsSnapshot};
+use crate::preflight::PreflightAssessment;
 use crate::snapshot::{AggregateSnapshot, ProcessSnapshot, SystemSnapshot};
 
 /// Protocol version supported by this module.
@@ -26,11 +28,16 @@ const MALFORMED_MESSAGE: &str =
 pub struct Request {
     /// Protocol version spoken by the client.
     pub version: u32,
-    /// Requested read-only operation.
+    /// Requested operation.
     pub command: RequestCommand,
+    /// Complete finding identity. Required by the close commands and rejected by
+    /// every other command.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding: Option<FindingId>,
 }
 
-/// Supported read-only operations.
+/// Supported operations. The monitoring commands are read-only; the close
+/// commands are the only action requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RequestCommand {
@@ -40,6 +47,13 @@ pub enum RequestCommand {
     Processes,
     /// Request the latest advisory findings.
     Suggestions,
+    /// Preview a fresh preflight for one finding identity. Sends no signal.
+    #[serde(rename = "close_preview")]
+    ClosePreview,
+    /// Ask the daemon to request one SIGTERM for one finding identity, after
+    /// revalidating at delivery.
+    #[serde(rename = "close_confirm")]
+    CloseConfirm,
 }
 
 /// Stable machine-readable protocol error code.
@@ -54,6 +68,8 @@ pub enum ErrorCode {
     MalformedRequest,
     /// Requested data has not been collected yet.
     Unavailable,
+    /// The finding identity is not among the current advisory findings.
+    NotFound,
 }
 
 /// Structured protocol error.
@@ -101,6 +117,22 @@ pub enum Response {
         processes_updated_at_ms: u64,
         /// Findings sorted by identity and observation time.
         findings: Vec<AdvisoryFinding>,
+    },
+    /// Fresh preflight for one finding identity, with its matching process row.
+    ClosePreview {
+        /// Protocol version used by this response.
+        version: u32,
+        /// Typed preflight result computed by the daemon.
+        assessment: PreflightAssessment,
+        /// Process row with the requested identity, when it is in the scan.
+        process: Option<ProcessSnapshot>,
+    },
+    /// Result of a close confirmation. A requested signal is not an exit.
+    CloseResult {
+        /// Protocol version used by this response.
+        version: u32,
+        /// Typed action outcome.
+        outcome: ActionOutcome,
     },
     /// Error response for a rejected request.
     Error {
@@ -169,6 +201,26 @@ impl Response {
         }
     }
 
+    /// Build a close preview response.
+    pub fn close_preview(
+        assessment: PreflightAssessment,
+        process: Option<ProcessSnapshot>,
+    ) -> Self {
+        Self::ClosePreview {
+            version: PROTOCOL_VERSION,
+            assessment,
+            process,
+        }
+    }
+
+    /// Build a close result response.
+    pub fn close_result(outcome: ActionOutcome) -> Self {
+        Self::CloseResult {
+            version: PROTOCOL_VERSION,
+            outcome,
+        }
+    }
+
     /// Build an error response from a protocol error.
     pub fn error(error: ProtocolError) -> Self {
         Self::Error {
@@ -214,6 +266,8 @@ pub fn decode_request(line: &str) -> Result<Request, ProtocolError> {
     struct RawRequest {
         version: u32,
         command: String,
+        #[serde(default)]
+        finding: Option<FindingId>,
     }
 
     let raw: RawRequest = serde_json::from_str(line).map_err(|_| malformed_request())?;
@@ -230,10 +284,25 @@ pub fn decode_request(line: &str) -> Result<Request, ProtocolError> {
         }
     };
 
-    Ok(Request {
-        version: raw.version,
+    let needs_finding = matches!(
         command,
-    })
+        RequestCommand::ClosePreview | RequestCommand::CloseConfirm
+    );
+    match (needs_finding, raw.finding.is_some()) {
+        (true, false) => Err(ProtocolError {
+            code: ErrorCode::MalformedRequest,
+            message: "close requests require a finding object".into(),
+        }),
+        (false, true) => Err(ProtocolError {
+            code: ErrorCode::MalformedRequest,
+            message: "only close requests accept a finding object".into(),
+        }),
+        _ => Ok(Request {
+            version: raw.version,
+            command,
+            finding: raw.finding,
+        }),
+    }
 }
 
 fn malformed_request() -> ProtocolError {
@@ -299,6 +368,7 @@ mod tests {
             let request = Request {
                 version: PROTOCOL_VERSION,
                 command,
+                finding: None,
             };
             assert_eq!(serde_json::to_string(&request).unwrap(), json);
             assert_eq!(serde_json::from_str::<Request>(json).unwrap(), request);
@@ -647,5 +717,121 @@ mod tests {
         let line = encode_line(&response).unwrap();
         assert!(!line.contains('\n'));
         assert_eq!(serde_json::from_str::<Response>(&line).unwrap(), response);
+    }
+
+    fn close_finding() -> crate::FindingId {
+        crate::FindingId {
+            pid: 42,
+            start_time_secs: 1_700_000_000,
+            kind: crate::FindingKind::Cpu,
+        }
+    }
+
+    fn close_assessment() -> crate::preflight::PreflightAssessment {
+        use crate::preflight::{PreflightAssessment, PreflightConclusion, RequestedAction};
+        PreflightAssessment {
+            finding: close_finding(),
+            action: RequestedAction::Close,
+            conclusion: PreflightConclusion::Denied,
+            reasons: vec![crate::preflight::PreflightReason::Ineligible(
+                crate::eligibility::EligibilityReason::MonitorProcess,
+            )],
+            owner_uid: Some(501),
+            observation_age_ms: Some(120),
+        }
+    }
+
+    #[test]
+    fn close_requests_round_trip_with_pinned_wire_strings() {
+        let finding = r#""finding":{"pid":42,"start_time_secs":1700000000,"kind":"cpu"}"#;
+        for (command, name) in [
+            (RequestCommand::ClosePreview, "close_preview"),
+            (RequestCommand::CloseConfirm, "close_confirm"),
+        ] {
+            let json = format!(r#"{{"version":1,"command":"{name}",{finding}}}"#);
+            let request = Request {
+                version: PROTOCOL_VERSION,
+                command,
+                finding: Some(close_finding()),
+            };
+            assert_eq!(encode_line(&request).unwrap(), json);
+            assert_eq!(decode_request(&json).unwrap(), request);
+        }
+    }
+
+    #[test]
+    fn close_request_without_a_finding_is_malformed() {
+        for name in ["close_preview", "close_confirm"] {
+            for json in [
+                format!(r#"{{"version":1,"command":"{name}"}}"#),
+                format!(r#"{{"version":1,"command":"{name}","finding":null}}"#),
+            ] {
+                let error = decode_request(&json).unwrap_err();
+                assert_eq!(error.code, ErrorCode::MalformedRequest, "{json}");
+                assert!(error.message.contains("finding"), "{json}");
+            }
+        }
+    }
+
+    #[test]
+    fn monitoring_request_with_a_finding_is_malformed() {
+        let finding = r#""finding":{"pid":42,"start_time_secs":1700000000,"kind":"cpu"}"#;
+        let json = format!(r#"{{"version":1,"command":"status",{finding}}}"#);
+        assert_eq!(
+            decode_request(&json).unwrap_err().code,
+            ErrorCode::MalformedRequest
+        );
+    }
+
+    #[test]
+    fn close_commands_keep_version_and_unknown_command_rules() {
+        let finding = r#""finding":{"pid":42,"start_time_secs":1700000000,"kind":"cpu"}"#;
+        let version_two = format!(r#"{{"version":2,"command":"close_confirm",{finding}}}"#);
+        assert_eq!(
+            decode_request(&version_two).unwrap_err().code,
+            ErrorCode::UnsupportedVersion
+        );
+        let unknown = format!(r#"{{"version":1,"command":"close_all",{finding}}}"#);
+        assert_eq!(
+            decode_request(&unknown).unwrap_err().code,
+            ErrorCode::UnsupportedCommand
+        );
+    }
+
+    #[test]
+    fn close_responses_use_pinned_kinds_and_round_trip() {
+        use crate::action::{ActionDenial, ActionOutcome};
+        use crate::eligibility::EligibilityReason;
+        use crate::preflight::PreflightReason;
+
+        let preview = Response::close_preview(close_assessment(), None);
+        let json = encode_line(&preview).unwrap();
+        assert!(json.starts_with(r#"{"kind":"close_preview","version":1,"assessment":{"#));
+        assert_eq!(serde_json::from_str::<Response>(&json).unwrap(), preview);
+
+        let result = Response::close_result(ActionOutcome::SigtermRequested);
+        let json = encode_line(&result).unwrap();
+        assert_eq!(
+            json,
+            r#"{"kind":"close_result","version":1,"outcome":"sigterm_requested"}"#
+        );
+        assert_eq!(serde_json::from_str::<Response>(&json).unwrap(), result);
+
+        let denied = Response::close_result(ActionOutcome::Denied {
+            reasons: vec![ActionDenial::Preflight(PreflightReason::Ineligible(
+                EligibilityReason::MonitorProcess,
+            ))],
+        });
+        let json = encode_line(&denied).unwrap();
+        assert!(json.contains(
+            r#""outcome":{"denied":{"reasons":[{"preflight":{"ineligible":"monitor_process"}}]}}"#
+        ));
+        assert_eq!(serde_json::from_str::<Response>(&json).unwrap(), denied);
+    }
+
+    #[test]
+    fn not_found_has_a_stable_wire_string() {
+        let json = encode_line(&ErrorCode::NotFound).unwrap();
+        assert_eq!(json, r#""not_found""#);
     }
 }

@@ -67,8 +67,9 @@ pub trait SignalSender {
 }
 
 /// Explicit reason why [`execute`] refused to send.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
+#[serde(rename_all = "snake_case")]
 pub enum ActionDenial {
     /// A reason from the preflight assessment, copied in order.
     Preflight(PreflightReason),
@@ -83,8 +84,9 @@ pub enum ActionDenial {
 }
 
 /// Failure reported by the sender after a permitted request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
+#[serde(rename_all = "snake_case")]
 pub enum ActionFailure {
     /// The operating system refused the request for permission reasons.
     PermissionDenied,
@@ -95,8 +97,9 @@ pub enum ActionFailure {
 }
 
 /// Typed result of [`execute`].
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
+#[serde(rename_all = "snake_case")]
 pub enum ActionOutcome {
     /// The sender accepted a SIGTERM request. No exit is promised or observed.
     SigtermRequested,

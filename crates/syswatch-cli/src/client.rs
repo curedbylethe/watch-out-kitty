@@ -64,6 +64,7 @@ pub fn request(
     let mut request = protocol::encode_line(&Request {
         version: protocol::PROTOCOL_VERSION,
         command,
+        finding: None,
     })
     .map_err(|error| ClientError::Encode(format!("cannot encode request: {error}")))?;
     request.push('\n');
@@ -141,6 +142,8 @@ pub fn request(
         Response::Status { version, .. }
         | Response::Processes { version, .. }
         | Response::Suggestions { version, .. }
+        | Response::ClosePreview { version, .. }
+        | Response::CloseResult { version, .. }
         | Response::Error { version, .. } => *version,
     };
     if version != protocol::PROTOCOL_VERSION {

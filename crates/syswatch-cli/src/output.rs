@@ -212,6 +212,7 @@ fn error_code(code: &ErrorCode) -> &'static str {
         ErrorCode::UnsupportedCommand => "unsupported_command",
         ErrorCode::MalformedRequest => "malformed_request",
         ErrorCode::Unavailable => "unavailable",
+        ErrorCode::NotFound => "not_found",
     }
 }
 

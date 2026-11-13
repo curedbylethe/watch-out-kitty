@@ -52,7 +52,8 @@ pub enum EligibilityState {
 }
 
 /// Evidence supporting a protected or uncertain assessment.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum EligibilityReason {
     /// The assessed identity is the monitor process.
     MonitorProcess,
