@@ -1,5 +1,5 @@
 use syswatch_core::{
-    findings::{self, Confidence, FindingId, FindingKind},
+    findings::{self, FindingId},
     protocol::{ErrorCode, Response},
     report::{self, ProcessSort, format_bytes, format_cpu_percent},
 };
@@ -103,11 +103,9 @@ pub fn render_suggestions(
                     _ => "<unknown>".to_owned(),
                 };
                 lines.push(format!(
-                    "{}-{}-{}  {}  {name}",
-                    id.pid,
-                    id.start_time_secs,
-                    kind_name(id.kind),
-                    confidence_name(finding.confidence),
+                    "{}  {}  {name}",
+                    id.reference(),
+                    finding.confidence,
                 ));
                 lines.push(format!(
                     "  {}",
@@ -187,7 +185,7 @@ pub fn render_inspect(
             format_bytes(memory.max_bytes),
         ),
     };
-    let explanation = report::sanitize_line(&finding.explanation, 72);
+    let explanation = report::sanitize_line(&finding.explanation, 160);
     let explanation = if explanation.is_empty() {
         "  (none)".to_owned()
     } else {
@@ -196,8 +194,8 @@ pub fn render_inspect(
     Ok(format!(
         "Finding: {}\nKind: {}\nConfidence: {}\nObserved: {} ago ({})\n\nEvidence:\n{samples}\n{cpu}\n{memory}\n\nExplanation:\n{explanation}\n\nReview suggestion only, not proof of abandonment or permission to terminate.",
         reference.reference(),
-        kind_name(reference.kind),
-        confidence_name(finding.confidence),
+        reference.kind,
+        finding.confidence,
         format_age_ms(now_ms, finding.observed_at_ms),
         finding.observed_at_ms,
     ))
@@ -206,22 +204,6 @@ pub fn render_inspect(
 /// Empty suffix for exactly one item, `s` otherwise.
 fn plural(count: usize) -> &'static str {
     if count == 1 { "" } else { "s" }
-}
-
-fn kind_name(kind: FindingKind) -> &'static str {
-    match kind {
-        FindingKind::Cpu => "cpu",
-        FindingKind::Memory => "memory",
-        _ => "unknown",
-    }
-}
-
-fn confidence_name(confidence: Confidence) -> &'static str {
-    match confidence {
-        Confidence::Low => "low",
-        Confidence::Medium => "medium",
-        Confidence::High => "high",
-    }
 }
 
 fn error_code(code: &ErrorCode) -> &'static str {
@@ -566,7 +548,7 @@ mod tests {
 
     #[test]
     fn inspect_bounds_and_sanitizes_the_explanation() {
-        let explanation = format!("\u{1b}[2J\né{}", "x".repeat(100));
+        let explanation = format!("\u{1b}[2J\né{}", "x".repeat(200));
         let found = inspect_finding(42, 1, FindingKind::Cpu, &explanation);
         let rendered = render_inspect(
             &suggestions(vec![found]),
@@ -584,7 +566,24 @@ mod tests {
             .find(|line| line.starts_with("  ?[2J"))
             .unwrap();
         assert!(line.ends_with("..."));
-        assert_eq!(line.chars().count(), 2 + 72);
+        assert_eq!(line.chars().count(), 2 + 160);
+    }
+
+    #[test]
+    fn inspect_keeps_the_closing_advice_of_a_real_explanation() {
+        // Same shape as the detector's memory explanation (detector.rs format string).
+        let explanation = "pid 42 held 256 MiB memory while using most 0.8% CPU across 6 samples over 120 s; review process";
+        let found = inspect_finding(42, 1, FindingKind::Memory, explanation);
+        let rendered = render_inspect(
+            &suggestions(vec![found]),
+            reference(42, 1, FindingKind::Memory),
+            NOW,
+        )
+        .unwrap();
+        assert!(
+            rendered.contains(&format!("\n  {explanation}\n")),
+            "{rendered}"
+        );
     }
 
     #[test]
