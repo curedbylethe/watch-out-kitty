@@ -13,6 +13,7 @@ use std::collections::BTreeMap;
 use crate::eligibility::{self, EligibilityReason, EligibilityState};
 use crate::findings::FindingId;
 use crate::provenance::ProcessProvenance;
+use crate::report::sanitize_line;
 use crate::snapshot::ProcessSnapshot;
 
 /// Action named by a preflight request.
@@ -168,6 +169,59 @@ fn decide(
                 .map(PreflightReason::Ineligible)
                 .collect(),
         ),
+    }
+}
+
+/// Renders a dry-run preview for people to read. Text only: it names the
+/// requested process and action and states that nothing was executed.
+pub fn preview(assessment: &PreflightAssessment, process: Option<&ProcessSnapshot>) -> String {
+    let name = process.map_or_else(
+        || "<unknown>".to_owned(),
+        |process| sanitize_line(&process.name, 24),
+    );
+    let action = match assessment.action {
+        RequestedAction::Close => "close",
+    };
+    let verdict = match assessment.conclusion {
+        PreflightConclusion::AllowedForConfirmation => "allowed for confirmation",
+        PreflightConclusion::Denied => "denied",
+        PreflightConclusion::NeedsFreshEvidence => "needs fresh evidence",
+    };
+    let mut lines = vec![format!(
+        "process: {} ({name})",
+        assessment.finding.reference()
+    )];
+    if let Some(uid) = assessment.owner_uid {
+        lines.push(format!("owner uid: {uid}"));
+    }
+    lines.push(format!("action: {action}"));
+    lines.push(format!("verdict: {verdict}"));
+    lines.extend(
+        assessment
+            .reasons
+            .iter()
+            .map(|reason| format!("reason: {}", reason_text(reason))),
+    );
+    if let Some(age_ms) = assessment.observation_age_ms {
+        lines.push(format!("observation age: {age_ms} ms"));
+    }
+    lines.push("nothing was executed; no signal was sent".to_owned());
+    if assessment.conclusion == PreflightConclusion::AllowedForConfirmation {
+        lines.push("a separate explicit confirmation is required before any action".to_owned());
+    }
+    lines.join("\n")
+}
+
+fn reason_text(reason: &PreflightReason) -> String {
+    match reason {
+        PreflightReason::NoObservation => "no process observation was supplied".to_owned(),
+        PreflightReason::StaleObservation => "observation is older than the allowed age".to_owned(),
+        PreflightReason::Exited => "no process with this PID is in the observation".to_owned(),
+        PreflightReason::IdentityReused => "PID is live with a different start time".to_owned(),
+        PreflightReason::UnverifiableIdentity => {
+            "start time is zero, so identity cannot be verified".to_owned()
+        }
+        PreflightReason::Ineligible(reason) => format!("eligibility {reason:?}"),
     }
 }
 
@@ -609,5 +663,83 @@ mod tests {
         let first = assess(&request(finding(42, 1)), Some(&observation));
         let second = assess(&request(finding(42, 1)), Some(&observation));
         assert_eq!(first, second);
+    }
+
+    #[test]
+    fn allowed_preview_names_process_action_verdict_age_and_confirmation() {
+        let result = assess_row(provenance(42, 1, Some(501), ParentContext::NoParent, None));
+        let rendered = preview(&result, Some(&process(42, 1)));
+        assert_eq!(
+            rendered,
+            "process: 42-1-cpu (worker)\n\
+             owner uid: 501\n\
+             action: close\n\
+             verdict: allowed for confirmation\n\
+             observation age: 1000 ms\n\
+             nothing was executed; no signal was sent\n\
+             a separate explicit confirmation is required before any action"
+        );
+        assert_eq!(rendered, preview(&result, Some(&process(42, 1))));
+    }
+
+    #[test]
+    fn denied_preview_renders_every_reason_on_its_own_line() {
+        let result = assess_row(provenance(42, 1, Some(0), ParentContext::NoParent, None));
+        assert_eq!(
+            preview(&result, Some(&process(42, 1))),
+            "process: 42-1-cpu (worker)\n\
+             owner uid: 0\n\
+             action: close\n\
+             verdict: denied\n\
+             reason: eligibility PrivilegedOwner\n\
+             reason: eligibility SystemOwner\n\
+             observation age: 1000 ms\n\
+             nothing was executed; no signal was sent"
+        );
+    }
+
+    #[test]
+    fn needs_fresh_evidence_preview_omits_owner_age_and_confirmation() {
+        let result = assess_with(finding(42, 1), None);
+        assert_eq!(
+            preview(&result, None),
+            "process: 42-1-cpu (<unknown>)\n\
+             action: close\n\
+             verdict: needs fresh evidence\n\
+             reason: no process observation was supplied\n\
+             nothing was executed; no signal was sent"
+        );
+    }
+
+    #[test]
+    fn preview_sanitizes_process_name_to_24_characters() {
+        let hostile = ProcessSnapshot {
+            name: format!("a\u{1b}[31m\té{}", "x".repeat(200)),
+            ..process(42, 1)
+        };
+        let result = assess_row(provenance(42, 1, Some(501), ParentContext::NoParent, None));
+        let rendered = preview(&result, Some(&hostile));
+        let expected_name = format!("a?[31m??{}...", "x".repeat(13));
+        assert_eq!(expected_name.chars().count(), 24);
+        assert!(rendered.contains(&format!("process: 42-1-cpu ({expected_name})\n")));
+        assert!(rendered.is_ascii());
+        assert!(!rendered.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn preview_never_claims_safety_or_signals() {
+        let allowed = assess_row(provenance(42, 1, Some(501), ParentContext::NoParent, None));
+        let denied = assess_row(provenance(42, 1, Some(0), ParentContext::NoParent, None));
+        let unknown = assess_with(finding(42, 1), None);
+        for rendered in [
+            preview(&allowed, Some(&process(42, 1))),
+            preview(&denied, Some(&process(42, 1))),
+            preview(&unknown, None),
+        ] {
+            for word in ["safe", "orphan", "stale", "abandoned", "SIGTERM", "SIGKILL"] {
+                assert!(!rendered.contains(word), "{word} in {rendered}");
+            }
+            assert!(rendered.contains("nothing was executed"));
+        }
     }
 }
