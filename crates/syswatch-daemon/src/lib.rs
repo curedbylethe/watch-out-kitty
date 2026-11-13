@@ -1,4 +1,5 @@
 pub mod clock;
+pub mod dismissal;
 pub mod latest;
 pub mod sampler;
 pub mod scheduler;
