@@ -33,7 +33,7 @@ and exits with status 0. CI currently runs on Ubuntu 24.04.
 `syswatch suggestions` prints the daemon's cached advisory findings. Each finding
 has a reference (`<pid>-<start_time_secs>-<kind>`), a confidence, the process
 name, and an explanation, followed by the ages of the evaluation and the process
-data. Names are shortened to 24 characters and explanations to 100. The command
+data. Names are shortened to 24 characters and explanations to 160. The command
 reads cached replies only and never scans processes. Before the daemon has enough
 history it prints `still collecting evidence: …`; when no finding qualifies it
 prints `(no current suggestions)`. Both exit with status 0. Daemon and IPC
