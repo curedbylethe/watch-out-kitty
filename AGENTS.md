@@ -29,10 +29,12 @@ cargo build --workspace
 cargo test --workspace
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
+python3 -m unittest discover -s kitty -t kitty -p 'test_*.py'
 ```
 
 Add or update relevant tests for behavior changes. CI runs formatting, Clippy,
-and tests on Ubuntu 24.04; it does not run a separate build job.
+tests, and the Python client suite (Python 3.15) on Ubuntu 24.04; it does not
+run a separate build job.
 
 ## Data semantics
 
