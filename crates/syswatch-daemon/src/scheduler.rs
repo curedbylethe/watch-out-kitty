@@ -154,6 +154,8 @@ mod tests {
                 processes: vec![],
                 observed_at_ms: 2,
                 suggestions: None,
+                provenance: Default::default(),
+                monitor: None,
             }
         }
     }
