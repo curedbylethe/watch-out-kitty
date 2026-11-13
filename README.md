@@ -149,7 +149,9 @@ executable path, capped file name of `argv[0]`, numeric owner UID, and parent
 identity. Only the capped `argv[0]` file name is copied into provenance; full
 arguments are not exposed or serialized through snapshots or IPC. Environment
 variables are not collected. Provenance is not part of `ProcessSnapshot` or the
-`processes` response.
+`processes` response. The daemon keeps each scan's provenance with that scan's
+processes, and preflight reads both from one scan. Provenance never crosses the
+socket.
 
 ### Advisory findings
 
@@ -221,6 +223,12 @@ macOS has no `pidfd`, so identity-safe signalling is not atomic. Prohibited:
 SIGKILL, escalation, retry, force, sudo, bulk actions, and advisor-triggered
 actions. The preflight performs no lookup of its own. The close requests carry its
 typed result over the socket, and protocol version `1` is unchanged.
+
+The daemon runs preflight itself, on its latest cached scan, which supplies the
+processes, provenance, and monitor identity together. A separate read-only
+provenance reply was rejected. Two requests can read two different scans, and
+matching them would need a scan token and a retry loop. Provenance also stays
+off the socket.
 
 The preview prints the same finding reference that `suggestions` and `inspect`
 use, described above, and states that nothing was executed.
