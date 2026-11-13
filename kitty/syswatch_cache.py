@@ -8,8 +8,14 @@ half-written snapshot. Only one writer (the refresh worker) exists.
 Polling limits: `status` at most every 1000 ms, `suggestions` at most every
 5000 ms. A shorter interval raises `ValueError`. A channel is `stale` when its
 data is older than three intervals (3000 ms, 15000 ms).
+
+`start()` runs one daemon thread, `syswatch-refresh`, per cache. It makes at most
+two requests per second, holds no queue and no history, and keeps only the last
+result per channel. `get_shared()` gives one cache per process.
 """
 
+import atexit
+import threading
 import time
 from dataclasses import dataclass, replace
 
@@ -116,6 +122,10 @@ class TelemetryCache:
         self._now_ms = now_ms or _wall_ms
         self._mono_ms = monotonic_ms or _mono_ms
         self._snapshot = _Snapshot()
+        self._due = {"status": 0, "suggestions": 0}
+        self._lifecycle = threading.Lock()
+        self._stop_event = threading.Event()
+        self._thread = None
 
     def view(self):
         snapshot = self._snapshot
@@ -148,3 +158,71 @@ class TelemetryCache:
             revision=snapshot.revision + (1 if changed else 0),
             **{channel: new},
         )
+
+    def _step(self, mono_ms):
+        readers = {"status": self._read_status, "suggestions": self._read_suggestions}
+        for channel in ("status", "suggestions"):
+            if mono_ms < self._due[channel]:
+                continue
+            interval = self._intervals[channel]
+            try:
+                result = readers[channel](
+                    self._socket_path,
+                    timeout_ms=self._timeout_ms,
+                    now_ms=self._now_ms(),
+                    max_age_ms=STALE_FACTOR * interval,
+                )
+            except Exception:  # shortcut: reader bugs are silent until next tick, add logging when diagnosing
+                result = None
+            completion = self._mono_ms()
+            if result is not None:
+                self._ingest(channel, result, completion)
+            self._due[channel] = completion + interval
+        return min(self._due.values())
+
+    def _run(self):
+        while not self._stop_event.is_set():
+            next_due = self._step(self._mono_ms())
+            self._stop_event.wait(max(0, next_due - self._mono_ms()) / 1000)
+
+    def start(self):
+        with self._lifecycle:
+            if self._thread is not None and self._thread.is_alive():
+                if not self._stop_event.is_set():
+                    return
+                self._thread.join()
+            self._stop_event.clear()
+            self._due = {"status": 0, "suggestions": 0}
+            self._thread = threading.Thread(target=self._run, name="syswatch-refresh", daemon=True)
+            self._thread.start()
+
+    def stop(self, timeout=2.0):
+        with self._lifecycle:
+            self._stop_event.set()
+            if self._thread is not None:
+                self._thread.join(timeout)
+                if not self._thread.is_alive():
+                    self._thread = None
+
+
+_shared = None
+_shared_lock = threading.Lock()
+
+
+def get_shared(**kwargs):
+    global _shared
+    with _shared_lock:
+        if _shared is None:
+            _shared = TelemetryCache(**kwargs)
+        return _shared
+
+
+def stop_shared():
+    global _shared
+    with _shared_lock:
+        if _shared is not None:
+            _shared.stop()
+            _shared = None
+
+
+atexit.register(stop_shared)
