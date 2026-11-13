@@ -1,5 +1,6 @@
 //! Core types and logic for syswatch.
 
+pub mod action;
 pub mod collector;
 pub mod config;
 pub mod detector;
@@ -13,6 +14,9 @@ pub mod protocol;
 pub mod provenance;
 pub mod report;
 pub mod snapshot;
+pub use action::{
+    ActionDenial, ActionFailure, ActionOutcome, ActionRequest, SignalDelivery, SignalSender,
+};
 pub use collector::Collector;
 pub use config::{ConfigError, MonitoringConfig};
 pub use detector::{DetectorConfig, IdleMemoryCandidate};
