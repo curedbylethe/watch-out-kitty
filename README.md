@@ -15,6 +15,7 @@ cargo run -p syswatch-core --example snapshot
 cargo run -p syswatch-daemon
 cargo run -p syswatch-cli -- status
 cargo run -p syswatch-cli -- top
+cargo run -p syswatch-cli -- suggestions
 ```
 
 The example prints one snapshot of aggregate CPU, physical memory, and the
@@ -29,6 +30,16 @@ to choose order and `--limit N` to set a positive row limit (default 10).
 Ctrl-C (SIGINT) or SIGTERM stops it cleanly, prints `syswatch-daemon: stopped`,
 and exits with status 0. CI currently runs on Ubuntu 24.04.
 
+`syswatch suggestions` prints the daemon's cached advisory findings. Each finding
+has a reference (`<pid>-<start_time_secs>-<kind>`), a confidence, the process
+name, and an explanation, followed by the ages of the evaluation and the process
+data. Names are shortened to 24 characters and explanations to 100. The command
+reads cached replies only and never scans processes. Before the daemon has enough
+history it prints `still collecting evidence: …`; when no finding qualifies it
+prints `(no current suggestions)`. Both exit with status 0. Daemon and IPC
+failures exit with status 1, and invalid arguments exit with status 2. The command
+offers no process action; a finding invites inspection.
+
 ### Daemon socket
 
 The daemon socket path is `$SYSWATCH_SOCKET` when set to an absolute path,
@@ -41,11 +52,11 @@ request line per connection; the server closes the connection after its reply.
 ## Current scope
 
 This repository contains the telemetry crate, snapshot example, foreground
-daemon, and `syswatch status` and `syswatch top` commands. The daemon evaluates
-advisory findings on process-sampling ticks, caches them separately from
-aggregate telemetry, and serves them through the read-only `suggestions`
-request. No CLI command or Kitty indicator shows them yet. A background service
-and a command that surfaces advisory findings are planned. See the
+daemon, and `syswatch status`, `syswatch top`, and `syswatch suggestions`
+commands. The daemon evaluates advisory findings on process-sampling ticks,
+caches them separately from aggregate telemetry, and serves them through the
+read-only `suggestions` request. No Kitty indicator shows them yet. A background
+service is planned. See the
 [issue tracker](https://github.com/curedbylethe/watch-out-kitty/issues) for
 planned work and [issue #13](https://github.com/curedbylethe/watch-out-kitty/issues/13)
 for contributor guidance.
@@ -151,9 +162,9 @@ does. Findings
 do not claim a process is safe or safe to terminate. The detector does not
 detect orphaned, stale, or abandoned processes and performs no process control.
 The daemon evaluates findings on process-sampling ticks and serves the cached
-result over IPC without recomputing it per request. The CLI and Kitty rendering
-do not show findings yet. A finding describes observed evidence and never
-authorizes a process action.
+result over IPC without recomputing it per request. `syswatch suggestions` prints
+the cached findings; Kitty rendering does not show them yet. A finding describes
+observed evidence and never authorizes a process action.
 
 ### Advisory eligibility
 
