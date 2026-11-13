@@ -32,10 +32,14 @@ pub struct ActionRequest {
     pub finding: FindingId,
     /// Current time in milliseconds, on the same clock as the observation.
     pub now_ms: u64,
-    /// Largest admitted-preflight age in milliseconds that still counts as fresh.
+    /// Largest age, in milliseconds, of the evidence behind the admitted preflight
+    /// when that preflight ran. It does not bound the time since the preflight ran.
     pub max_preflight_age_ms: u64,
     /// Largest delivery-time observation age in milliseconds that still counts as fresh.
     pub max_observation_age_ms: u64,
+    /// UID of the process making the request. Only the caller's own processes may be
+    /// signalled. The caller must supply its real UID; this crate does not read it.
+    pub caller_uid: u32,
 }
 
 /// Result of one delivery attempt by a [`SignalSender`].
@@ -74,6 +78,8 @@ pub enum ActionDenial {
     PreflightTooOld,
     /// The admitted preflight is for a different finding identity.
     PreflightMismatch,
+    /// The target's owner UID is not the caller's UID.
+    OwnerMismatch,
 }
 
 /// Failure reported by the sender after a permitted request.
@@ -164,6 +170,10 @@ pub fn execute(
                 .map(ActionDenial::Preflight)
                 .collect(),
         );
+    }
+
+    if fresh.owner_uid != Some(request.caller_uid) {
+        return denied(vec![ActionDenial::OwnerMismatch]);
     }
 
     match sender.request_stop(request.finding.identity()) {
@@ -350,6 +360,7 @@ mod tests {
             now_ms: NOW_MS,
             max_preflight_age_ms: MAX_AGE_MS,
             max_observation_age_ms: MAX_AGE_MS,
+            caller_uid: 501,
         };
         execute(&request, admitted, &delivery.observation(), sender)
     }
@@ -495,6 +506,37 @@ mod tests {
                     EligibilityReason::SystemOwner,
                 )),
             ])
+        );
+        assert!(sender.calls.is_empty());
+    }
+
+    #[test]
+    fn other_user_owner_is_owner_mismatch_without_send() {
+        let scan = Scan::one(42, 1, 502, OBSERVED_MS);
+        let admitted = assess_scan(finding(42, 1), Some(&scan));
+        let mut sender = sender(SignalDelivery::Requested);
+        assert_eq!(
+            run(finding(42, 1), &admitted, &scan, &mut sender),
+            denied(vec![ActionDenial::OwnerMismatch])
+        );
+        assert!(sender.calls.is_empty());
+    }
+
+    #[test]
+    fn denied_admission_without_reasons_falls_back_without_send() {
+        let admitted = PreflightAssessment {
+            finding: finding(42, 1),
+            action: RequestedAction::Close,
+            conclusion: PreflightConclusion::Denied,
+            reasons: Vec::new(),
+            owner_uid: Some(501),
+            observation_age_ms: Some(0),
+        };
+        let delivery = Scan::one(42, 1, 501, OBSERVED_MS);
+        let mut sender = sender(SignalDelivery::Requested);
+        assert_eq!(
+            run(finding(42, 1), &admitted, &delivery, &mut sender),
+            denied(vec![ActionDenial::PreflightNotAllowed])
         );
         assert!(sender.calls.is_empty());
     }
