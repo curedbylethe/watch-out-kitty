@@ -1,5 +1,5 @@
 use syswatch_core::{
-    findings::{self, Confidence, FindingKind},
+    findings::{self, Confidence, FindingId, FindingKind},
     protocol::{ErrorCode, Response},
     report::{self, ProcessSort, format_bytes, format_cpu_percent},
 };
@@ -136,6 +136,78 @@ pub fn render_suggestions(
     }
 }
 
+/// Renders one cached finding, selected by its full identity. The reply
+/// carries no process name, argv, or path, so none is printed.
+pub fn render_inspect(
+    response: &Response,
+    reference: FindingId,
+    now_ms: u64,
+) -> Result<String, String> {
+    let finding = match response {
+        Response::Suggestions { findings, .. } => findings
+            .iter()
+            .find(|finding| finding.id == reference)
+            .ok_or_else(|| {
+                format!(
+                    "finding not found: {}; it may have expired",
+                    reference.reference()
+                )
+            })?,
+        Response::Error { code, message, .. } => {
+            return Err(format!("daemon error ({}): {message}", error_code(code)));
+        }
+        _ => return Err("invalid response from daemon: expected suggestions response".to_owned()),
+    };
+    let evidence = &finding.evidence;
+    let samples = if evidence.sample_count == 0 {
+        "  samples: no retained samples".to_owned()
+    } else {
+        format!(
+            "  samples: {} sample{} over {:.1}s",
+            evidence.sample_count,
+            plural(evidence.sample_count),
+            evidence.span_ms as f64 / 1000.0,
+        )
+    };
+    let cpu = match &evidence.cpu {
+        None => "  CPU: not measured".to_owned(),
+        Some(cpu) => format!(
+            "  CPU: mean {}, max {}, {} valid sample{}",
+            format_cpu_percent(cpu.mean_percent),
+            format_cpu_percent(cpu.max_percent),
+            cpu.valid_samples,
+            plural(cpu.valid_samples),
+        ),
+    };
+    let memory = match &evidence.memory {
+        None => "  Memory: not measured".to_owned(),
+        Some(memory) => format!(
+            "  Memory: latest {}, max {}",
+            format_bytes(memory.latest_bytes),
+            format_bytes(memory.max_bytes),
+        ),
+    };
+    let explanation = report::sanitize_line(&finding.explanation, 72);
+    let explanation = if explanation.is_empty() {
+        "  (none)".to_owned()
+    } else {
+        format!("  {explanation}")
+    };
+    Ok(format!(
+        "Finding: {}\nKind: {}\nConfidence: {}\nObserved: {} ago ({})\n\nEvidence:\n{samples}\n{cpu}\n{memory}\n\nExplanation:\n{explanation}\n\nReview suggestion only, not proof of abandonment or permission to terminate.",
+        reference.reference(),
+        kind_name(reference.kind),
+        confidence_name(finding.confidence),
+        format_age_ms(now_ms, finding.observed_at_ms),
+        finding.observed_at_ms,
+    ))
+}
+
+/// Empty suffix for exactly one item, `s` otherwise.
+fn plural(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
 fn kind_name(kind: FindingKind) -> &'static str {
     match kind {
         FindingKind::Cpu => "cpu",
@@ -167,10 +239,13 @@ pub fn format_age_ms(now_ms: u64, then_ms: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_age_ms, render_status, render_suggestions, render_top};
+    use super::{format_age_ms, render_inspect, render_status, render_suggestions, render_top};
     use syswatch_core::{
         MemorySnapshot,
-        findings::{AdvisoryFinding, Confidence, FindingEvidence, FindingId, FindingKind},
+        findings::{
+            AdvisoryFinding, Confidence, CpuActivity, FindingEvidence, FindingId, FindingKind,
+            MemoryActivity,
+        },
         protocol::{ErrorCode, PROTOCOL_VERSION, ProtocolError, Response},
         report::ProcessSort,
         snapshot::{AggregateSnapshot, ProcessSnapshot},
@@ -380,6 +455,155 @@ mod tests {
     }
 
     const FOOTER: &str = "findings evaluated 0.4s ago; process data: 0.5 s old";
+
+    fn inspect_finding(
+        pid: u32,
+        start: u64,
+        kind: FindingKind,
+        explanation: &str,
+    ) -> AdvisoryFinding {
+        let mut found = finding(pid, kind, Confidence::High, explanation);
+        found.id.start_time_secs = start;
+        found
+    }
+
+    fn reference(pid: u32, start: u64, kind: FindingKind) -> FindingId {
+        FindingId {
+            pid,
+            start_time_secs: start,
+            kind,
+        }
+    }
+
+    #[test]
+    fn inspect_renders_the_full_report() {
+        let mut found = inspect_finding(
+            42,
+            1_700_000_000,
+            FindingKind::Memory,
+            "pid 42 held 512 MiB while idle; review this process",
+        );
+        found.observed_at_ms = 1_700_000_000_123;
+        found.evidence = FindingEvidence {
+            sample_count: 7,
+            span_ms: 120_000,
+            cpu: Some(CpuActivity {
+                max_percent: 0.8,
+                mean_percent: 0.4,
+                valid_samples: 7,
+            }),
+            memory: Some(MemoryActivity {
+                latest_bytes: 512 * 1024 * 1024,
+                max_bytes: 600 * 1024 * 1024,
+            }),
+        };
+        let rendered = render_inspect(
+            &suggestions(vec![found]),
+            reference(42, 1_700_000_000, FindingKind::Memory),
+            1_700_000_004_323,
+        )
+        .unwrap();
+        assert_eq!(
+            rendered,
+            [
+                "Finding: 42-1700000000-memory",
+                "Kind: memory",
+                "Confidence: high",
+                "Observed: 4.2s ago (1700000000123)",
+                "",
+                "Evidence:",
+                "  samples: 7 samples over 120.0s",
+                "  CPU: mean 0.4%, max 0.8%, 7 valid samples",
+                "  Memory: latest 512.0 MiB, max 600.0 MiB",
+                "",
+                "Explanation:",
+                "  pid 42 held 512 MiB while idle; review this process",
+                "",
+                "Review suggestion only, not proof of abandonment or permission to terminate.",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn inspect_selects_the_exact_identity() {
+        let response = suggestions(vec![
+            inspect_finding(42, 1, FindingKind::Memory, "first"),
+            inspect_finding(42, 2, FindingKind::Memory, "second"),
+            inspect_finding(42, 1, FindingKind::Cpu, "third"),
+        ]);
+        let rendered =
+            render_inspect(&response, reference(42, 1, FindingKind::Memory), NOW).unwrap();
+        assert!(rendered.starts_with("Finding: 42-1-memory\n"));
+        assert!(rendered.contains("\n  first\n"));
+        assert!(!rendered.contains("second") && !rendered.contains("third"));
+    }
+
+    #[test]
+    fn inspect_reports_a_missing_finding() {
+        let response = suggestions(vec![inspect_finding(42, 2, FindingKind::Memory, "other")]);
+        assert_eq!(
+            render_inspect(&response, reference(42, 1, FindingKind::Memory), NOW),
+            Err("finding not found: 42-1-memory; it may have expired".to_owned())
+        );
+    }
+
+    #[test]
+    fn inspect_renders_missing_measurements() {
+        let found = inspect_finding(42, 1, FindingKind::Cpu, "");
+        let rendered = render_inspect(
+            &suggestions(vec![found]),
+            reference(42, 1, FindingKind::Cpu),
+            NOW,
+        )
+        .unwrap();
+        assert!(rendered.contains("\n  samples: no retained samples\n"));
+        assert!(rendered.contains("\n  CPU: not measured\n"));
+        assert!(rendered.contains("\n  Memory: not measured\n"));
+        assert!(rendered.contains("\nExplanation:\n  (none)\n"));
+        assert!(rendered.ends_with("permission to terminate."));
+    }
+
+    #[test]
+    fn inspect_bounds_and_sanitizes_the_explanation() {
+        let explanation = format!("\u{1b}[2J\né{}", "x".repeat(100));
+        let found = inspect_finding(42, 1, FindingKind::Cpu, &explanation);
+        let rendered = render_inspect(
+            &suggestions(vec![found]),
+            reference(42, 1, FindingKind::Cpu),
+            NOW,
+        )
+        .unwrap();
+        assert!(
+            rendered
+                .chars()
+                .all(|c| c == '\n' || matches!(c, '\u{20}'..='\u{7e}'))
+        );
+        let line = rendered
+            .lines()
+            .find(|line| line.starts_with("  ?[2J"))
+            .unwrap();
+        assert!(line.ends_with("..."));
+        assert_eq!(line.chars().count(), 2 + 72);
+    }
+
+    #[test]
+    fn inspect_reports_daemon_errors_and_wrong_response_kind() {
+        let unavailable = Response::error(ProtocolError {
+            code: ErrorCode::Unavailable,
+            message:
+                "suggestions are not available until enough process history has been collected"
+                    .to_owned(),
+        });
+        assert_eq!(
+            render_inspect(&unavailable, reference(42, 1, FindingKind::Cpu), NOW),
+            Err("daemon error (unavailable): suggestions are not available until enough process history has been collected".to_owned())
+        );
+        assert_eq!(
+            render_inspect(&status(None, None), reference(42, 1, FindingKind::Cpu), NOW),
+            Err("invalid response from daemon: expected suggestions response".to_owned())
+        );
+    }
 
     #[test]
     fn render_suggestions_lists_findings_with_reference_and_name() {

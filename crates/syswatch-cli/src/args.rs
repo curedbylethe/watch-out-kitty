@@ -1,4 +1,7 @@
-use syswatch_core::report::ProcessSort;
+use syswatch_core::{
+    findings::{FindingId, FindingKind},
+    report::ProcessSort,
+};
 
 pub const USAGE: &str = "Usage: syswatch <COMMAND>
 
@@ -8,6 +11,7 @@ Commands:
   status  Show CPU, memory and process freshness from the running daemon
   top     Show cached processes (--sort memory|cpu, default memory; --limit N, default 10)
   suggestions  Show cached advisory findings for review; never acts on a process
+  inspect  Explain one cached advisory finding (pid-start_time_secs-kind)
   help    Show this help
 
 Options:
@@ -28,6 +32,16 @@ this command never acts on a process.
 Options:
   -h, --help  Show this help";
 
+pub const INSPECT_USAGE: &str = "Usage: syswatch inspect <finding-reference>
+
+Print the cached evidence for one advisory finding.
+
+Arguments:
+  <finding-reference>  pid-start_time_secs-kind, for example 42-1700000000-memory
+
+Options:
+  -h, --help           Show this help";
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Status,
@@ -35,6 +49,8 @@ pub enum Command {
     TopHelp,
     Suggestions,
     SuggestionsHelp,
+    Inspect { reference: FindingId },
+    InspectHelp,
     Help,
 }
 
@@ -55,7 +71,64 @@ pub fn parse(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
         "status" => Err(usage_error("status accepts no arguments")),
         "top" => parse_top(args),
         "suggestions" => parse_suggestions(args),
+        "inspect" => parse_inspect(args),
         other => Err(usage_error(&format!("unrecognized command: {other}"))),
+    }
+}
+
+fn parse_inspect(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Command, String> {
+    let mut args = args.into_iter();
+    let Some(first) = args.next() else {
+        return Err(usage_error("inspect requires a finding reference"));
+    };
+    let first = first.to_string_lossy();
+    if matches!(first.as_ref(), "-h" | "--help") {
+        return match args.next() {
+            None => Ok(Command::InspectHelp),
+            Some(_) => Err(usage_error("inspect help accepts no arguments")),
+        };
+    }
+    if args.next().is_some() {
+        return Err(usage_error("inspect accepts one finding reference"));
+    }
+    parse_reference(&first)
+        .map(|reference| Command::Inspect { reference })
+        .map_err(|message| usage_error(&message))
+}
+
+/// Parses `<pid>-<start_time_secs>-<kind>`, the form `syswatch suggestions`
+/// prints. Fields are checked in order; the first failure wins.
+fn parse_reference(value: &str) -> Result<FindingId, String> {
+    const SHAPE: &str = "invalid finding reference: expected pid-start_time_secs-kind";
+    let fields: Vec<&str> = value.split('-').collect();
+    let [pid, start, kind] = fields.as_slice() else {
+        return Err(SHAPE.to_owned());
+    };
+    if fields.iter().any(|field| field.is_empty()) {
+        return Err(SHAPE.to_owned());
+    }
+    let pid =
+        parse_digits::<u32>(pid).ok_or("invalid finding reference: pid must be an integer")?;
+    let start_time_secs = parse_digits::<u64>(start)
+        .ok_or("invalid finding reference: start_time_secs must be an integer")?;
+    let kind = match *kind {
+        "cpu" => FindingKind::Cpu,
+        "memory" => FindingKind::Memory,
+        _ => return Err("invalid finding reference: kind must be cpu or memory".to_owned()),
+    };
+    Ok(FindingId {
+        pid,
+        start_time_secs,
+        kind,
+    })
+}
+
+/// Rejects signs and whitespace, which `str::parse` would otherwise accept.
+fn parse_digits<T: std::str::FromStr>(field: &str) -> Option<T> {
+    if field.bytes().all(|byte| byte.is_ascii_digit()) {
+        field.parse().ok()
+    } else {
+        None
     }
 }
 
@@ -118,8 +191,11 @@ fn parse_top(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, SUGGESTIONS_USAGE, TOP_USAGE, USAGE, parse};
-    use syswatch_core::report::ProcessSort;
+    use super::{Command, INSPECT_USAGE, SUGGESTIONS_USAGE, TOP_USAGE, USAGE, parse};
+    use syswatch_core::{
+        findings::{FindingId, FindingKind},
+        report::ProcessSort,
+    };
 
     fn args(values: &[&str]) -> Vec<std::ffi::OsString> {
         values.iter().map(std::ffi::OsString::from).collect()
@@ -243,6 +319,115 @@ mod tests {
             assert!(error.contains("suggestions accepts no arguments"));
             assert!(error.contains(USAGE), "usage missing from {error}");
         }
+    }
+
+    fn memory_reference(pid: u32, start_time_secs: u64) -> FindingId {
+        FindingId {
+            pid,
+            start_time_secs,
+            kind: FindingKind::Memory,
+        }
+    }
+
+    #[test]
+    fn inspect_is_accepted() {
+        assert_eq!(
+            parse(args(&["inspect", "42-1700000000-memory"])),
+            Ok(Command::Inspect {
+                reference: memory_reference(42, 1_700_000_000)
+            })
+        );
+    }
+
+    #[test]
+    fn inspect_accepts_leading_zeros() {
+        assert_eq!(
+            parse(args(&["inspect", "042-0005-cpu"])),
+            Ok(Command::Inspect {
+                reference: FindingId {
+                    pid: 42,
+                    start_time_secs: 5,
+                    kind: FindingKind::Cpu,
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn inspect_help_is_recognized() {
+        for spelling in ["-h", "--help"] {
+            assert_eq!(
+                parse(args(&["inspect", spelling])),
+                Ok(Command::InspectHelp)
+            );
+        }
+        let error = parse(args(&["inspect", "--help", "42-5-memory"])).unwrap_err();
+        assert!(error.contains("inspect help accepts no arguments"));
+        assert!(INSPECT_USAGE.contains("pid-start_time_secs-kind"));
+    }
+
+    #[test]
+    fn inspect_requires_exactly_one_reference() {
+        assert!(
+            parse(args(&["inspect"]))
+                .unwrap_err()
+                .contains("inspect requires a finding reference")
+        );
+        assert!(
+            parse(args(&["inspect", "42-5-memory", "43-5-memory"]))
+                .unwrap_err()
+                .contains("inspect accepts one finding reference")
+        );
+    }
+
+    #[test]
+    fn inspect_rejects_invalid_references() {
+        const SHAPE: &str = "invalid finding reference: expected pid-start_time_secs-kind";
+        let cases = [
+            ("", SHAPE),
+            ("42", SHAPE),
+            ("42-5", SHAPE),
+            ("42-5-memory-1", SHAPE),
+            ("--", SHAPE),
+            (
+                "x-5-memory",
+                "invalid finding reference: pid must be an integer",
+            ),
+            (
+                "+42-5-memory",
+                "invalid finding reference: pid must be an integer",
+            ),
+            (
+                " 42-5-memory",
+                "invalid finding reference: pid must be an integer",
+            ),
+            (
+                "4294967296-5-memory",
+                "invalid finding reference: pid must be an integer",
+            ),
+            (
+                "42-18446744073709551616-memory",
+                "invalid finding reference: start_time_secs must be an integer",
+            ),
+            (
+                "42-5-disk",
+                "invalid finding reference: kind must be cpu or memory",
+            ),
+            (
+                "42-5-Memory",
+                "invalid finding reference: kind must be cpu or memory",
+            ),
+        ];
+        for (value, message) in cases {
+            let error = parse(args(&["inspect", value])).unwrap_err();
+            assert!(error.contains(message), "{value:?} gave {error}");
+            assert!(error.contains(USAGE), "usage missing for {value:?}");
+        }
+    }
+
+    #[test]
+    fn usage_lists_inspect() {
+        assert!(USAGE.lines().any(|line| line.contains("inspect")));
     }
 
     #[test]

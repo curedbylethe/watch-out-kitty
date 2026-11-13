@@ -20,8 +20,13 @@ fn main() {
         args::Command::Status => syswatch_core::protocol::RequestCommand::Status,
         args::Command::Top { .. } => syswatch_core::protocol::RequestCommand::Processes,
         args::Command::Suggestions => syswatch_core::protocol::RequestCommand::Suggestions,
+        args::Command::Inspect { .. } => syswatch_core::protocol::RequestCommand::Suggestions,
         args::Command::SuggestionsHelp => {
             println!("{}", args::SUGGESTIONS_USAGE);
+            return;
+        }
+        args::Command::InspectHelp => {
+            println!("{}", args::INSPECT_USAGE);
             return;
         }
         args::Command::Help => {
@@ -72,9 +77,13 @@ fn main() {
             .flatten();
             output::render_suggestions(&response, processes.as_ref(), now_ms)
         }
+        args::Command::Inspect { reference } => {
+            output::render_inspect(&response, reference, now_ms)
+        }
         args::Command::Help => return,
         args::Command::TopHelp => return,
         args::Command::SuggestionsHelp => return,
+        args::Command::InspectHelp => return,
     };
     match rendered {
         Ok(output) => println!("{output}"),
