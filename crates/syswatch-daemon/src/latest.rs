@@ -1,5 +1,9 @@
+use std::collections::BTreeMap;
+
+use syswatch_core::provenance::ProcessProvenance;
 use syswatch_core::{
-    AggregateSnapshot, AlertEvent, AlertPolicy, FindingId, SuggestionsSnapshot, SystemSnapshot,
+    AdvisoryFinding, AggregateSnapshot, AlertEvent, AlertPolicy, FindingId, ProcessSnapshot,
+    SuggestionsSnapshot, SystemSnapshot,
 };
 
 use crate::{dismissal::DismissedFindings, sampler::ProcessScan};
@@ -8,6 +12,15 @@ use crate::{dismissal::DismissedFindings, sampler::ProcessScan};
 pub struct Cached {
     pub snapshot: Option<SystemSnapshot>,
     pub suggestions: Option<SuggestionsSnapshot>,
+}
+
+/// Borrowed process evidence from one scan; see [`LatestSnapshot::action_state`].
+pub struct ActionState<'a> {
+    pub processes: &'a [ProcessSnapshot],
+    pub provenance: &'a BTreeMap<(u32, u64), ProcessProvenance>,
+    pub observed_at_ms: u64,
+    pub monitor: Option<(u32, u64)>,
+    pub findings: &'a [AdvisoryFinding],
 }
 
 #[derive(Default)]
@@ -57,6 +70,21 @@ impl LatestSnapshot {
             memory: aggregate.memory.clone(),
             processes: processes.map_or_else(Vec::new, |scan| scan.processes.clone()),
             processes_updated_at_ms: processes.map(|scan| scan.observed_at_ms),
+        })
+    }
+
+    /// Borrowed view of the latest scan for action preflight. Returns `None`
+    /// until a scan with computed findings exists. Dismissals are not applied:
+    /// an explicitly named finding stays checkable.
+    pub fn action_state(&self) -> Option<ActionState<'_>> {
+        let scan = self.processes.as_ref()?;
+        let suggestions = scan.suggestions.as_ref()?;
+        Some(ActionState {
+            processes: &scan.processes,
+            provenance: &scan.provenance,
+            observed_at_ms: scan.observed_at_ms,
+            monitor: scan.monitor,
+            findings: &suggestions.findings,
         })
     }
 
@@ -127,6 +155,8 @@ mod tests {
             processes: vec![],
             observed_at_ms: 20,
             suggestions: Some(suggestions.clone()),
+            provenance: Default::default(),
+            monitor: None,
         });
         let cached = latest.cached();
         assert!(cached.snapshot.is_some());
@@ -141,6 +171,8 @@ mod tests {
             processes: vec![],
             observed_at_ms: 20,
             suggestions: None,
+            provenance: Default::default(),
+            monitor: None,
         });
         let snapshot = latest.snapshot().unwrap();
         assert_eq!(snapshot.timestamp_ms, 10);
@@ -194,6 +226,8 @@ mod tests {
                 processes_updated_at_ms: 20,
                 findings,
             }),
+            provenance: Default::default(),
+            monitor: None,
         }
     }
 
@@ -264,6 +298,8 @@ mod tests {
             processes: vec![process(42, 1)],
             observed_at_ms: 20,
             suggestions: None,
+            provenance: Default::default(),
+            monitor: None,
         });
         latest.dismiss(finding(42, 1).id);
         assert!(latest.cached().suggestions.is_none());
@@ -410,6 +446,8 @@ mod tests {
             processes: vec![process(42, 1)],
             observed_at_ms: T + 5_000,
             suggestions: None,
+            provenance: Default::default(),
+            monitor: None,
         });
         assert_eq!(latest.alert_events(), before.as_slice());
         latest.set_processes(scan_at(
@@ -418,5 +456,35 @@ mod tests {
             vec![finding(42, 1)],
         ));
         assert!(latest.alert_events().is_empty());
+    }
+
+    #[test]
+    fn action_state_is_none_until_a_scan_has_findings() {
+        let mut latest = LatestSnapshot::default();
+        assert!(latest.action_state().is_none());
+        latest.set_processes(ProcessScan {
+            processes: vec![process(42, 1)],
+            observed_at_ms: 20,
+            suggestions: None,
+            provenance: Default::default(),
+            monitor: None,
+        });
+        assert!(latest.action_state().is_none());
+        latest.set_processes(scan(vec![process(42, 1)], vec![finding(42, 1)]));
+        assert!(latest.action_state().is_some());
+    }
+
+    #[test]
+    fn action_state_keeps_dismissed_findings_and_scan_monitor() {
+        let mut latest = LatestSnapshot::default();
+        let mut input = scan(vec![process(42, 1)], vec![finding(42, 1)]);
+        input.monitor = Some((7, 9));
+        latest.set_processes(input);
+        latest.dismiss(finding(42, 1).id);
+        let state = latest.action_state().unwrap();
+        assert_eq!(state.findings, [finding(42, 1)]);
+        assert_eq!(state.monitor, Some((7, 9)));
+        assert_eq!(state.observed_at_ms, 20);
+        assert_eq!(state.processes.len(), 1);
     }
 }

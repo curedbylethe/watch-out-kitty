@@ -1,6 +1,9 @@
+use std::collections::BTreeMap;
+
+use syswatch_core::provenance::ProcessProvenance;
 use syswatch_core::{
     AggregateSnapshot, Collector, DetectorConfig, ProcessHistory, ProcessSnapshot,
-    SuggestionsSnapshot, detector::detect_idle_memory_consumers,
+    SuggestionsSnapshot, detector::detect_idle_memory_consumers, eligibility::monitor_identity,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -8,6 +11,10 @@ pub struct ProcessScan {
     pub processes: Vec<ProcessSnapshot>,
     pub observed_at_ms: u64,
     pub suggestions: Option<SuggestionsSnapshot>,
+    /// Provenance from the same scan. Daemon-local: never serialized.
+    pub provenance: BTreeMap<(u32, u64), ProcessProvenance>,
+    /// Identity of this daemon's own process, when it appears in the scan.
+    pub monitor: Option<(u32, u64)>,
 }
 
 pub trait Sampler {
@@ -53,6 +60,8 @@ impl Sampler for LiveSampler {
         self.history.record_scan(observed_at_ms, &processes);
         let started_at_ms = *self.started_at_ms.get_or_insert(observed_at_ms);
         self.scans = self.scans.saturating_add(1);
+        let provenance = self.collector.provenance().clone();
+        let monitor = monitor_identity(&provenance);
         let suggestions = suggestions_ready(
             started_at_ms,
             observed_at_ms,
@@ -65,7 +74,7 @@ impl Sampler for LiveSampler {
             findings: detect_idle_memory_consumers(
                 &self.history,
                 observed_at_ms,
-                self.collector.provenance(),
+                &provenance,
                 &self.detector_config,
             ),
         });
@@ -73,6 +82,8 @@ impl Sampler for LiveSampler {
             processes,
             observed_at_ms,
             suggestions,
+            provenance,
+            monitor,
         }
     }
 }
@@ -125,6 +136,18 @@ mod tests {
         sampler.refresh_aggregate();
         assert_eq!(sampler.history().len(), len);
         sampler.refresh_processes();
+    }
+
+    #[test]
+    fn live_scan_carries_provenance_and_monitor_for_this_process() {
+        let scan = LiveSampler::new().unwrap().refresh_processes();
+        let pid = std::process::id();
+        assert!(
+            scan.provenance
+                .keys()
+                .any(|(candidate, _)| *candidate == pid)
+        );
+        assert_eq!(scan.monitor.map(|(candidate, _)| candidate), Some(pid));
     }
 
     #[test]
