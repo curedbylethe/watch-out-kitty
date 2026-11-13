@@ -1,5 +1,7 @@
 //! History-only candidates are not findings or eligibility decisions.
 //! They do not establish that a process is idle, abandoned, or safe to terminate.
+//! A zero start time is unverifiable, so it is never a candidate. This is advisory
+//! only; ordinary telemetry still displays such a process.
 
 use std::collections::BTreeMap;
 
@@ -61,6 +63,8 @@ pub struct IdleMemoryCandidate {
     pub span_ms: u64,
 }
 /// Returns candidates based only on retained observations and thresholds.
+///
+/// Records with a zero start time are skipped: that identity is unverifiable.
 pub fn idle_memory_candidates(
     history: &ProcessHistory,
     now_ms: u64,
@@ -72,6 +76,7 @@ pub fn idle_memory_candidates(
     let mut candidates = Vec::new();
     for record in history.iter() {
         if record.disappeared_at_ms.is_some()
+            || record.start_time_secs == 0
             || now_ms.saturating_sub(record.last_seen_ms) > config.max_staleness_ms
         {
             continue;
@@ -133,6 +138,8 @@ pub fn idle_memory_candidates(
 }
 
 /// Returns advisory findings for eligible possible idle memory consumers.
+///
+/// A zero start time never yields a finding, because it has no candidate.
 pub fn detect_idle_memory_consumers(
     history: &ProcessHistory,
     now_ms: u64,
@@ -460,6 +467,67 @@ mod tests {
             )]);
             assert!(detect(&h, &rows).is_empty(), "{label}");
         }
+    }
+
+    fn zero_start_history(samples: &[(u64, f32, u64)]) -> ProcessHistory {
+        let mut h = ProcessHistory::new();
+        for &(time, cpu, memory) in samples {
+            let mut p = process(cpu, memory);
+            p.start_time_secs = 0;
+            h.record_scan(time, &[p]);
+        }
+        h
+    }
+
+    #[test]
+    fn zero_start_identity_is_not_a_candidate() {
+        let h = zero_start_history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        assert!(candidates(&h, 120_001).is_empty());
+    }
+
+    #[test]
+    fn zero_start_identity_yields_no_finding() {
+        let h = zero_start_history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        assert!(detect(&h, &scan(vec![eligible(42, 0)])).is_empty());
+    }
+
+    #[test]
+    fn zero_start_does_not_hide_a_valid_identity() {
+        let mut h = ProcessHistory::new();
+        for (time, cpu, memory) in samples(0.0, DEFAULT_MIN_MEMORY_BYTES) {
+            let mut zero = process(cpu, memory);
+            zero.start_time_secs = 0;
+            let mut valid = process(cpu, memory);
+            valid.pid = 43;
+            valid.start_time_secs = 7;
+            h.record_scan(time, &[zero, valid]);
+        }
+        let found = detect(&h, &scan(vec![eligible(42, 0), eligible(43, 7)]));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id.identity(), (43, 7));
+    }
+
+    #[test]
+    fn pid_reuse_after_zero_start_keeps_identities_separate() {
+        let mut h = zero_start_history(&samples(0.0, DEFAULT_MIN_MEMORY_BYTES));
+        for (time, cpu, memory) in samples(0.0, DEFAULT_MIN_MEMORY_BYTES) {
+            let mut p = process(cpu, memory);
+            p.start_time_secs = 7;
+            h.record_scan(time + 120_001, &[p]);
+        }
+        assert!(
+            idle_memory_candidates(&h, 240_002, &DetectorConfig::default())
+                .iter()
+                .all(|c| c.identity.1 != 0)
+        );
+        let found = detect_idle_memory_consumers(
+            &h,
+            240_002,
+            &scan(vec![eligible(42, 7)]),
+            &DetectorConfig::default(),
+        );
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id.start_time_secs, 7);
     }
 
     #[test]
