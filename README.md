@@ -204,7 +204,8 @@ step may be offered. The preflight sends no signal. A separate action service
 in `crates/syswatch-core/src/action.rs` may, on explicit instruction, request
 one SIGTERM after it obtains a fresh allowed preflight result. Immediately
 before the request, it revalidates the identity, existence, and eligibility of
-the process. A requested signal does not mean the process exited. The kernel
+the process, and that the process belongs to the caller's UID. The caller
+supplies its real UID. A requested signal does not mean the process exited. The kernel
 applies the signal to whichever process holds the PID when the signal is sent;
 macOS has no `pidfd`, so identity-safe signalling is not atomic. Prohibited:
 SIGKILL, escalation, retry, force, sudo, bulk actions, and advisor-triggered
