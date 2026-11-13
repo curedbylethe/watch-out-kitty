@@ -118,3 +118,59 @@ fn suggestions_command_leaves_the_daemon_serving() {
     assert!(status.contains(r#""kind":"status""#), "{status}");
     assert!(daemon.socket().exists());
 }
+
+#[test]
+fn inspect_reports_the_unavailable_state() {
+    let dir = TempDir::new();
+    let daemon = Daemon::start(&dir);
+
+    let output = run_cli(daemon.socket(), &["inspect", "42-1700000000-memory"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert!(
+        stderr.contains(
+            "syswatch: daemon error (unavailable): suggestions are not available until enough process history has been collected"
+        ),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn inspect_reports_a_missing_daemon() {
+    let dir = TempDir::new();
+
+    let output = run_cli(&socket_path(&dir), &["inspect", "42-1700000000-memory"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot connect to daemon"), "{stderr}");
+}
+
+#[test]
+fn inspect_rejects_a_malformed_reference_before_connecting() {
+    let dir = TempDir::new();
+
+    let output = run_cli(&socket_path(&dir), &["inspect", "42-5"]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage: syswatch"), "{stderr}");
+    assert!(
+        stderr.contains("invalid finding reference: expected pid-start_time_secs-kind"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("cannot connect"), "{stderr}");
+}
+
+#[test]
+fn inspect_help_exits_zero() {
+    let dir = TempDir::new();
+
+    let output = run_cli(&socket_path(&dir), &["inspect", "--help"]);
+    assert!(output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stdout).contains("Usage: syswatch inspect"),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
