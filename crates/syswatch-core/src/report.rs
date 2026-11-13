@@ -123,11 +123,34 @@ pub fn sanitize_field(text: &str, max_chars: usize) -> String {
         .collect()
 }
 
+/// Makes text from another process printable and bounded for one terminal
+/// line: every character outside printable ASCII becomes `?`; text longer than
+/// `max_chars` keeps `max_chars - 3` characters and ends with `...`.
+/// `max_chars` below 4 truncates without the ellipsis.
+pub fn sanitize_line(text: &str, max_chars: usize) -> String {
+    let printable: Vec<char> = text
+        .chars()
+        .map(|character| match character {
+            '\u{20}'..='\u{7e}' => character,
+            _ => '?',
+        })
+        .collect();
+    if printable.len() <= max_chars {
+        return printable.into_iter().collect();
+    }
+    if max_chars < 4 {
+        return printable.into_iter().take(max_chars).collect();
+    }
+    let mut line: String = printable.into_iter().take(max_chars - 3).collect();
+    line.push_str("...");
+    line
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         ProcessSort, format_bytes, format_cpu_percent, format_process_age, render_table,
-        sanitize_field, top_by_sort, truncate_name,
+        sanitize_field, sanitize_line, top_by_sort, truncate_name,
     };
     use crate::snapshot::ProcessSnapshot;
 
@@ -272,6 +295,26 @@ mod tests {
     #[test]
     fn sanitize_field_replaces_control_characters() {
         assert_eq!(sanitize_field("a\u{1b}[2Jb\nc", 99), "a�[2Jb�c");
+    }
+
+    #[test]
+    fn sanitize_line_replaces_non_printable_ascii() {
+        assert_eq!(sanitize_line("a\u{1b}\nb\u{e9}c", 99), "a??b?c");
+    }
+
+    #[test]
+    fn sanitize_line_bounds_long_text() {
+        let long = "x".repeat(80);
+        let bounded = sanitize_line(&long, 72);
+        assert_eq!(bounded, format!("{}...", "x".repeat(69)));
+        assert_eq!(bounded.chars().count(), 72);
+        assert_eq!(sanitize_line("abcdef", 2), "ab");
+    }
+
+    #[test]
+    fn sanitize_line_keeps_short_and_empty_text() {
+        assert_eq!(sanitize_line("", 72), "");
+        assert_eq!(sanitize_line("short", 72), "short");
     }
 
     #[test]
