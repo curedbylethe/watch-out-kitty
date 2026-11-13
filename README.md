@@ -104,6 +104,22 @@ The client sets no freshness threshold. With `max_age_ms=None`, `age_ms` reports
 
 Run its suite from the repository root with the command in [Development](#development).
 
+### Kitty cache and refresh
+
+`kitty/syswatch_cache.py` keeps the latest `status` and `suggestions` results in memory for Kitty drawing code. `TelemetryCache.view()` reads one immutable snapshot and never does I/O, so a tab-bar `draw_tab` can call it directly.
+
+- Refresh intervals: `status` every 1000 ms and `suggestions` every 5000 ms by default. A shorter interval raises `ValueError`. The daemon samples at 1 s and 5 s, so actual refresh periods are about one second for `status` and about five seconds for `suggestions`, plus scan time.
+- Staleness: a channel is `stale` three intervals after its data was produced (3000 ms for `status`, 15000 ms for `suggestions`). The check runs at read time, so a stopped worker cannot present old data as live.
+- Failures: a failed fetch clears `value`. The last good value stays in `last_value` with `last_age_ms`.
+- States: `not_refreshed` before the first fetch, then each `ClientResult.state`. `warming_up` is normal for `suggestions` for about the first two minutes after the daemon starts.
+- Worker: `start()` runs one daemon thread named `syswatch-refresh` per cache. `get_shared()` returns the process-wide cache. `stop()` and `stop_shared()` stop a cache, and `atexit` stops the shared cache at exit. The worker makes at most two requests per second and keeps only the last result per channel.
+
+`kitty/syswatch_redraw.py` repaints the tab bar when the cache revision changes. It uses three Kitty symbols that are not public API: `kitty.fast_data_types.add_timer`, `kitty.boss.get_boss().os_window_map`, and `TabManager.mark_tab_bar_dirty()`. Kitty 0.49.2 provides them. `install_redraw_timer()` checks them and returns `False` if any is missing or fails. Then the bar updates only when Kitty redraws it for its own reasons, such as a tab change, focus change, or title change, and the data can be older than the polling interval. Re-run the probe after a Kitty upgrade.
+
+`kitty/probe_tab_bar.py` is a demonstration, not an installed indicator. On the last tab it draws `SW`, the state, the revision, CPU, and memory. To try it, symlink it as `tab_bar.py` in a directory named by `KITTY_CONFIG_DIRECTORY`, and set `tab_bar_style custom`, `tab_bar_edge top`, and `tab_bar_min_tabs 1` in that directory's `kitty.conf`. Use a symlink, not a copy: the probe finds the adapter modules next to its real path.
+
+This repository does not install a Kitty indicator.
+
 ## Project files
 
 | Path | Contents |
@@ -143,6 +159,9 @@ Run its suite from the repository root with the command in [Development](#develo
 | `crates/syswatch-cli/src/main.rs` | Command dispatch and process entry point |
 | `crates/syswatch-cli/src/output.rs` | Status, process, and advisory report rendering |
 | `kitty/syswatch_client.py` | Read-only Python client for cached status and suggestions |
+| `kitty/syswatch_cache.py` | In-memory cache of status and suggestions, refresh worker, shared instance |
+| `kitty/syswatch_redraw.py` | Tab-bar repaint timer on non-public Kitty symbols, with a fallback |
+| `kitty/probe_tab_bar.py` | Demonstration tab bar; symlink to try it, not installed |
 | `kitty/test_*.py` | Python client tests (`unittest`) |
 | `.github/workflows/ci.yml` | Ubuntu build checks |
 | `LICENSE` | Apache-2.0 license |
