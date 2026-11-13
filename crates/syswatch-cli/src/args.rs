@@ -5,13 +5,14 @@ use syswatch_core::{
 
 pub const USAGE: &str = "Usage: syswatch <COMMAND>
 
-Read-only client for the syswatch daemon.
+Client for the syswatch daemon. Only close can request a process action.
 
 Commands:
   status  Show CPU, memory and process freshness from the running daemon
   top     Show cached processes (--sort memory|cpu, default memory; --limit N, default 10)
   suggestions  Show cached advisory findings for review; never acts on a process
   inspect  Explain one cached advisory finding (pid-start_time_secs-kind)
+  close  Preview one finding, then request SIGTERM after you type yes
   help    Show this help
 
 Options:
@@ -32,6 +33,17 @@ this command never acts on a process.
 Options:
   -h, --help  Show this help";
 
+pub const CLOSE_USAGE: &str = "Usage: syswatch close <finding-reference>
+
+Preview one advisory finding, then request one SIGTERM after you type yes.
+Needs an interactive terminal. A requested signal is not a confirmed exit.
+
+Arguments:
+  <finding-reference>  pid-start_time_secs-kind, for example 42-1700000000-memory
+
+Options:
+  -h, --help           Show this help";
+
 pub const INSPECT_USAGE: &str = "Usage: syswatch inspect <finding-reference>
 
 Print the cached evidence for one advisory finding.
@@ -51,11 +63,17 @@ pub enum Command {
     SuggestionsHelp,
     Inspect { reference: FindingId },
     InspectHelp,
+    Close { reference: FindingId },
+    CloseHelp,
     Help,
 }
 
 fn usage_error(message: &str) -> String {
     format!("{USAGE}\n\nsyswatch: {message}")
+}
+
+fn close_usage_error(message: &str) -> String {
+    format!("{CLOSE_USAGE}\n\nsyswatch: {message}")
 }
 
 pub fn parse(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Command, String> {
@@ -65,13 +83,13 @@ pub fn parse(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
     };
     let command = command.to_string_lossy();
     match command.as_ref() {
-        "help" | "-h" | "--help" if args.next().is_none() => Ok(Command::Help),
-        "help" | "-h" | "--help" => Err(usage_error(&format!("{command} accepts no arguments"))),
+        "help" | "-h" | "--help" => parse_help(&command, args),
         "status" if args.next().is_none() => Ok(Command::Status),
         "status" => Err(usage_error("status accepts no arguments")),
         "top" => parse_top(args),
         "suggestions" => parse_suggestions(args),
         "inspect" => parse_inspect(args),
+        "close" => parse_close(args),
         other => Err(usage_error(&format!("unrecognized command: {other}"))),
     }
 }
@@ -94,6 +112,40 @@ fn parse_inspect(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<C
     parse_reference(&first)
         .map(|reference| Command::Inspect { reference })
         .map_err(|message| usage_error(&message))
+}
+
+fn parse_help(
+    command: &str,
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Result<Command, String> {
+    let mut args = args.into_iter();
+    match args.next() {
+        None => Ok(Command::Help),
+        Some(topic) if command == "help" && topic == "close" && args.next().is_none() => {
+            Ok(Command::CloseHelp)
+        }
+        Some(_) => Err(usage_error(&format!("{command} accepts no arguments"))),
+    }
+}
+
+fn parse_close(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Command, String> {
+    let mut args = args.into_iter();
+    let Some(first) = args.next() else {
+        return Err(close_usage_error("close requires a finding reference"));
+    };
+    let first = first.to_string_lossy();
+    if matches!(first.as_ref(), "-h" | "--help") {
+        return match args.next() {
+            None => Ok(Command::CloseHelp),
+            Some(_) => Err(close_usage_error("close help accepts no arguments")),
+        };
+    }
+    if args.next().is_some() {
+        return Err(close_usage_error("close accepts one finding reference"));
+    }
+    parse_reference(&first)
+        .map(|reference| Command::Close { reference })
+        .map_err(|message| close_usage_error(&message))
 }
 
 /// Parses `<pid>-<start_time_secs>-<kind>`, the form `syswatch suggestions`
@@ -191,7 +243,8 @@ fn parse_top(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, INSPECT_USAGE, SUGGESTIONS_USAGE, TOP_USAGE, USAGE, parse};
+    use super::{CLOSE_USAGE, Command, INSPECT_USAGE, SUGGESTIONS_USAGE, TOP_USAGE, USAGE, parse};
+    const USAGE_MARKER: &str = "syswatch:";
     use syswatch_core::{
         findings::{FindingId, FindingKind},
         report::ProcessSort,
@@ -351,6 +404,44 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn close_accepts_one_complete_reference() {
+        assert_eq!(
+            parse(args(&["close", "42-1-memory"])),
+            Ok(Command::Close {
+                reference: FindingId {
+                    pid: 42,
+                    start_time_secs: 1,
+                    kind: FindingKind::Memory,
+                },
+            })
+        );
+    }
+
+    #[test]
+    fn close_rejects_selectors_and_flags_as_usage_errors() {
+        for values in [
+            &["close"][..],
+            &["close", "42"],
+            &["close", "42-1"],
+            &["close", "42-1-cpu", "extra"],
+            &["close", "--yes"],
+            &["close", "1"],
+        ] {
+            let error = parse(args(values)).unwrap_err();
+            assert!(error.contains(USAGE_MARKER), "{values:?}: {error}");
+        }
+    }
+
+    #[test]
+    fn close_help_is_recognized_by_flag_and_topic() {
+        assert_eq!(parse(args(&["close", "--help"])), Ok(Command::CloseHelp));
+        assert_eq!(parse(args(&["close", "-h"])), Ok(Command::CloseHelp));
+        assert_eq!(parse(args(&["help", "close"])), Ok(Command::CloseHelp));
+        assert!(CLOSE_USAGE.contains("<finding-reference>"));
+        assert!(CLOSE_USAGE.contains("yes"));
     }
 
     #[test]
