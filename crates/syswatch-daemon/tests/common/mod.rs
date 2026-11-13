@@ -267,6 +267,7 @@ pub fn run_cli(socket: &Path, args: &[&str]) -> Output {
     let child = Command::new(cli_binary())
         .args(args)
         .env("SYSWATCH_SOCKET", socket)
+        .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
