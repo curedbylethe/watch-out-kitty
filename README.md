@@ -102,7 +102,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-daemon/src/sampler.rs` | Collector, process history, and advisory evaluation |
 | `crates/syswatch-daemon/src/signals.rs` | SIGINT and SIGTERM handling |
 | `crates/syswatch-daemon/tests` | End-to-end daemon and socket tests |
-| `crates/syswatch-cli` | Status and process-ranking command-line client |
+| `crates/syswatch-cli` | Status, process-ranking, and advisory findings command-line client |
 | `crates/syswatch-cli/src/args.rs` | Command-line argument parsing |
 | `crates/syswatch-cli/src/client.rs` | Daemon IPC client |
 | `crates/syswatch-cli/src/main.rs` | Command dispatch and process entry point |
