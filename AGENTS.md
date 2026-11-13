@@ -39,7 +39,9 @@ Memory fields and process memory use bytes. Usage fields are percentages.
 The first CPU sample is a warm-up and is not representative; CPU sampling
 requires an interval between refreshes. Per-process CPU can exceed 100% when a
 process uses multiple cores. Process identity is `(pid, start_time_secs)`;
-operating systems reuse PIDs. Process names use lossy decoding and may contain
+operating systems reuse PIDs. A finding reference is `pid-start_time_secs-kind`; `syswatch inspect`
+matches the full identity, so a reference cannot select a process whose PID was reused. The command is
+read-only and performs no process action. Process names use lossy decoding and may contain
 replacement characters.
 Process provenance is collector advisory metadata keyed by `(pid, start_time_secs)`;
 `None` means denied or unavailable. Only the capped file name of `argv[0]` is
