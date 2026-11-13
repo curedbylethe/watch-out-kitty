@@ -75,7 +75,7 @@ A consumer that polls slower than the process tick misses intermediate events.
 
 ## Process lifecycle policy
 
-The crate does not detect stale processes and never forces termination; the action service can only request one SIGTERM. Any future
+The crate does not detect stale processes and never forces termination. It requests a signal only through the action service, and only for one explicitly confirmed finding identity. Advisory findings never request one. Any future
 stale-process detection must use evidence. Parent PID 1 alone does not show
 that a process is abandoned. Process termination requires explicit safeguards
 and confirmation. Advisory findings describe observed evidence and never
@@ -97,6 +97,10 @@ atomic on macOS, which has no `pidfd`; the kernel applies the signal to
 whichever process holds the PID at delivery. Prohibited: SIGKILL, retry,
 escalation, force, sudo, bulk actions, and advisor-triggered actions. Admission
 by preflight is not permission for any of them.
+
+`syswatch close` is the only command that may lead to a signal. It requires an interactive terminal
+and an exact `yes` at the prompt. Background sampling, advisory findings, and Kitty rendering stay
+read-only. A requested signal is not an exit: report it as a request, never as a confirmed exit.
 
 ## Change discipline
 
