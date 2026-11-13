@@ -1,4 +1,5 @@
 use syswatch_core::{
+    findings::{self, Confidence, FindingKind},
     protocol::{ErrorCode, Response},
     report::{self, ProcessSort, format_bytes, format_cpu_percent},
 };
@@ -70,6 +71,87 @@ pub fn render_top(
     }
 }
 
+/// Renders cached findings. `processes` is the optional cached process reply
+/// used only to look up names; a missing or foreign reply renders `<unknown>`.
+pub fn render_suggestions(
+    response: &Response,
+    processes: Option<&Response>,
+    now_ms: u64,
+) -> Result<String, String> {
+    match response {
+        Response::Suggestions {
+            evaluated_at_ms,
+            processes_updated_at_ms,
+            findings,
+            ..
+        } => {
+            let mut findings = findings.clone();
+            findings::sort(&mut findings);
+            let mut lines = Vec::new();
+            for finding in &findings {
+                let id = finding.id;
+                let name = match processes {
+                    Some(Response::Processes {
+                        processes: rows, ..
+                    }) => rows
+                        .iter()
+                        .find(|row| (row.pid, row.start_time_secs) == id.identity())
+                        .map_or_else(
+                            || "<unknown>".to_owned(),
+                            |row| report::sanitize_field(&row.name, 24),
+                        ),
+                    _ => "<unknown>".to_owned(),
+                };
+                lines.push(format!(
+                    "{}-{}-{}  {}  {name}",
+                    id.pid,
+                    id.start_time_secs,
+                    kind_name(id.kind),
+                    confidence_name(finding.confidence),
+                ));
+                lines.push(format!(
+                    "  {}",
+                    report::sanitize_field(&finding.explanation, 100)
+                ));
+            }
+            if findings.is_empty() {
+                lines.push("(no current suggestions)".to_owned());
+            }
+            lines.push(format!(
+                "findings evaluated {} ago; {}",
+                format_age_ms(now_ms, *evaluated_at_ms),
+                report::format_process_age(now_ms, Some(*processes_updated_at_ms)),
+            ));
+            Ok(lines.join("\n"))
+        }
+        Response::Error {
+            code: ErrorCode::Unavailable,
+            message,
+            ..
+        } => Ok(format!("still collecting evidence: {message}")),
+        Response::Error { code, message, .. } => {
+            Err(format!("daemon error ({}): {message}", error_code(code)))
+        }
+        _ => Err("invalid response from daemon: expected suggestions response".to_owned()),
+    }
+}
+
+fn kind_name(kind: FindingKind) -> &'static str {
+    match kind {
+        FindingKind::Cpu => "cpu",
+        FindingKind::Memory => "memory",
+        _ => "unknown",
+    }
+}
+
+fn confidence_name(confidence: Confidence) -> &'static str {
+    match confidence {
+        Confidence::Low => "low",
+        Confidence::Medium => "medium",
+        Confidence::High => "high",
+    }
+}
+
 fn error_code(code: &ErrorCode) -> &'static str {
     match code {
         ErrorCode::UnsupportedVersion => "unsupported_version",
@@ -85,9 +167,10 @@ pub fn format_age_ms(now_ms: u64, then_ms: u64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_age_ms, render_status, render_top};
+    use super::{format_age_ms, render_status, render_suggestions, render_top};
     use syswatch_core::{
         MemorySnapshot,
+        findings::{AdvisoryFinding, Confidence, FindingEvidence, FindingId, FindingKind},
         protocol::{ErrorCode, PROTOCOL_VERSION, ProtocolError, Response},
         report::ProcessSort,
         snapshot::{AggregateSnapshot, ProcessSnapshot},
@@ -259,5 +342,179 @@ mod tests {
         assert!(rows[0].starts_with("2"));
         assert!(rows[1].starts_with("1"));
         assert!(rows[1].ends_with("n/a"));
+    }
+
+    const NOW: u64 = 1_700_000_000_523;
+
+    fn finding(
+        pid: u32,
+        kind: FindingKind,
+        confidence: Confidence,
+        explanation: &str,
+    ) -> AdvisoryFinding {
+        AdvisoryFinding {
+            id: FindingId {
+                pid,
+                start_time_secs: 1,
+                kind,
+            },
+            confidence,
+            observed_at_ms: 1,
+            explanation: explanation.to_owned(),
+            evidence: FindingEvidence {
+                sample_count: 0,
+                span_ms: 0,
+                cpu: None,
+                memory: None,
+            },
+        }
+    }
+
+    fn suggestions(findings: Vec<AdvisoryFinding>) -> Response {
+        Response::Suggestions {
+            version: PROTOCOL_VERSION,
+            evaluated_at_ms: 1_700_000_000_123,
+            processes_updated_at_ms: 1_700_000_000_023,
+            findings,
+        }
+    }
+
+    const FOOTER: &str = "findings evaluated 0.4s ago; process data: 0.5 s old";
+
+    #[test]
+    fn render_suggestions_lists_findings_with_reference_and_name() {
+        let response = suggestions(vec![finding(
+            42,
+            FindingKind::Memory,
+            Confidence::Medium,
+            "pid 42 held 256 MiB",
+        )]);
+        let names = processes(vec![process(42, "worker", 1, 0.0)]);
+        let rendered = render_suggestions(&response, Some(&names), NOW).unwrap();
+        assert_eq!(
+            rendered,
+            format!("42-1-memory  medium  worker\n  pid 42 held 256 MiB\n{FOOTER}")
+        );
+    }
+
+    #[test]
+    fn render_suggestions_orders_by_shared_sort_key() {
+        let response = suggestions(vec![
+            finding(43, FindingKind::Memory, Confidence::Low, "later"),
+            finding(42, FindingKind::Cpu, Confidence::Low, "earlier"),
+        ]);
+        let rendered = render_suggestions(&response, None, NOW).unwrap();
+        let headers = rendered
+            .lines()
+            .filter(|line| !line.starts_with("  "))
+            .collect::<Vec<_>>();
+        assert!(headers[0].starts_with("42-1-cpu"));
+        assert!(headers[1].starts_with("43-1-memory"));
+    }
+
+    #[test]
+    fn render_suggestions_reports_an_empty_list() {
+        assert_eq!(
+            render_suggestions(&suggestions(Vec::new()), None, NOW).unwrap(),
+            format!("(no current suggestions)\n{FOOTER}")
+        );
+    }
+
+    #[test]
+    fn render_suggestions_reports_still_collecting() {
+        let response = Response::error(ProtocolError {
+            code: ErrorCode::Unavailable,
+            message:
+                "suggestions are not available until enough process history has been collected"
+                    .to_owned(),
+        });
+        assert_eq!(
+            render_suggestions(&response, None, NOW).unwrap(),
+            "still collecting evidence: suggestions are not available until enough process history has been collected"
+        );
+    }
+
+    #[test]
+    fn render_suggestions_reports_other_daemon_errors() {
+        let response = Response::error(ProtocolError {
+            code: ErrorCode::MalformedRequest,
+            message: "bad".to_owned(),
+        });
+        assert_eq!(
+            render_suggestions(&response, None, NOW).unwrap_err(),
+            "daemon error (malformed_request): bad"
+        );
+    }
+
+    #[test]
+    fn render_suggestions_rejects_a_foreign_response() {
+        assert_eq!(
+            render_suggestions(&status(Some(1), Some(1)), None, NOW).unwrap_err(),
+            "invalid response from daemon: expected suggestions response"
+        );
+    }
+
+    #[test]
+    fn render_suggestions_tolerates_a_missing_process_reply() {
+        let response = suggestions(vec![finding(42, FindingKind::Cpu, Confidence::High, "x")]);
+        let foreign = status(Some(1), Some(1));
+        for names in [None, Some(&foreign)] {
+            let rendered = render_suggestions(&response, names, NOW).unwrap();
+            assert!(rendered.starts_with("42-1-cpu  high  <unknown>\n"));
+        }
+    }
+
+    #[test]
+    fn render_suggestions_sanitizes_names_and_explanations() {
+        let response = suggestions(vec![finding(
+            42,
+            FindingKind::Cpu,
+            Confidence::Low,
+            &format!("a\nb{}", "y".repeat(200)),
+        )]);
+        let names = processes(vec![process(
+            42,
+            &format!("a\u{1b}{}", "x".repeat(40)),
+            1,
+            0.0,
+        )]);
+        let rendered = render_suggestions(&response, Some(&names), NOW).unwrap();
+        let lines = rendered.lines().collect::<Vec<_>>();
+        assert_eq!(lines.len(), 3, "explanation must stay on one line");
+        assert_eq!(
+            lines[0],
+            format!("42-1-cpu  low  a\u{fffd}{}", "x".repeat(22))
+        );
+        assert_eq!(lines[1].chars().count(), 2 + 100);
+        assert!(!rendered.contains('\u{1b}'));
+    }
+
+    #[test]
+    fn render_suggestions_reports_data_age_and_future_timestamps() {
+        let response = Response::Suggestions {
+            version: PROTOCOL_VERSION,
+            evaluated_at_ms: NOW + 10,
+            processes_updated_at_ms: 1_700_000_000_023,
+            findings: Vec::new(),
+        };
+        assert!(
+            render_suggestions(&response, None, NOW)
+                .unwrap()
+                .ends_with("findings evaluated 0.0s ago; process data: 0.5 s old")
+        );
+    }
+
+    #[test]
+    fn render_suggestions_never_mentions_actions() {
+        let response = suggestions(vec![finding(
+            42,
+            FindingKind::Memory,
+            Confidence::High,
+            "held memory",
+        )]);
+        let rendered = render_suggestions(&response, None, NOW).unwrap();
+        for word in ["safe", "kill", "terminate", "signal", "stale", "orphan"] {
+            assert!(!rendered.contains(word), "{word} in {rendered}");
+        }
     }
 }

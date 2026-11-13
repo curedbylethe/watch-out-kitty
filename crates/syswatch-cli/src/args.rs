@@ -7,6 +7,7 @@ Read-only client for the syswatch daemon.
 Commands:
   status  Show CPU, memory and process freshness from the running daemon
   top     Show cached processes (--sort memory|cpu, default memory; --limit N, default 10)
+  suggestions  Show cached advisory findings for review; never acts on a process
   help    Show this help
 
 Options:
@@ -19,11 +20,21 @@ Options:
   --limit N           Maximum rows, positive integer (default: 10)
   -h, --help          Show this help";
 
+pub const SUGGESTIONS_USAGE: &str = "Usage: syswatch suggestions
+
+Show cached advisory findings for review. Findings are advisory only;
+this command never acts on a process.
+
+Options:
+  -h, --help  Show this help";
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Status,
     Top { sort: ProcessSort, limit: usize },
     TopHelp,
+    Suggestions,
+    SuggestionsHelp,
     Help,
 }
 
@@ -43,7 +54,26 @@ pub fn parse(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
         "status" if args.next().is_none() => Ok(Command::Status),
         "status" => Err(usage_error("status accepts no arguments")),
         "top" => parse_top(args),
+        "suggestions" => parse_suggestions(args),
         other => Err(usage_error(&format!("unrecognized command: {other}"))),
+    }
+}
+
+fn parse_suggestions(
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Result<Command, String> {
+    let mut args = args.into_iter();
+    match args.next() {
+        None => Ok(Command::Suggestions),
+        Some(argument)
+            if matches!(
+                argument.to_string_lossy().as_ref(),
+                "-h" | "--help" | "help"
+            ) && args.next().is_none() =>
+        {
+            Ok(Command::SuggestionsHelp)
+        }
+        Some(_) => Err(usage_error("suggestions accepts no arguments")),
     }
 }
 
@@ -88,7 +118,7 @@ fn parse_top(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, TOP_USAGE, USAGE, parse};
+    use super::{Command, SUGGESTIONS_USAGE, TOP_USAGE, USAGE, parse};
     use syswatch_core::report::ProcessSort;
 
     fn args(values: &[&str]) -> Vec<std::ffi::OsString> {
@@ -189,5 +219,37 @@ mod tests {
         assert!(TOP_USAGE.contains("--sort memory|cpu"));
         assert!(TOP_USAGE.contains("default: memory"));
         assert!(TOP_USAGE.contains("default: 10"));
+    }
+
+    #[test]
+    fn suggestions_is_accepted() {
+        assert_eq!(parse(args(&["suggestions"])), Ok(Command::Suggestions));
+    }
+
+    #[test]
+    fn suggestions_help_is_accepted() {
+        for spelling in ["--help", "-h", "help"] {
+            assert_eq!(
+                parse(args(&["suggestions", spelling])),
+                Ok(Command::SuggestionsHelp)
+            );
+        }
+    }
+
+    #[test]
+    fn suggestions_rejects_extra_arguments() {
+        for values in [&["suggestions", "--limit", "3"][..], &["suggestions", "42"]] {
+            let error = parse(args(values)).unwrap_err();
+            assert!(error.contains("suggestions accepts no arguments"));
+            assert!(error.contains(USAGE), "usage missing from {error}");
+        }
+    }
+
+    #[test]
+    fn usage_lists_suggestions_without_action_flags() {
+        assert!(USAGE.lines().any(|line| line.contains("suggestions")));
+        assert!(SUGGESTIONS_USAGE.contains("--help"));
+        assert!(!SUGGESTIONS_USAGE.contains("--limit"));
+        assert!(!SUGGESTIONS_USAGE.contains("--sort"));
     }
 }
