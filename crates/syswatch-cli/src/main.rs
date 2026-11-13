@@ -19,6 +19,11 @@ fn main() {
     let request_command = match &command {
         args::Command::Status => syswatch_core::protocol::RequestCommand::Status,
         args::Command::Top { .. } => syswatch_core::protocol::RequestCommand::Processes,
+        args::Command::Suggestions => syswatch_core::protocol::RequestCommand::Suggestions,
+        args::Command::SuggestionsHelp => {
+            println!("{}", args::SUGGESTIONS_USAGE);
+            return;
+        }
         args::Command::Help => {
             println!("{}", args::USAGE);
             return;
@@ -50,8 +55,26 @@ fn main() {
     let rendered = match command {
         args::Command::Status => output::render_status(&response, now_ms),
         args::Command::Top { sort, limit } => output::render_top(&response, sort, limit, now_ms),
+        args::Command::Suggestions => {
+            // Best-effort name join; a failure only leaves names as <unknown>.
+            let processes = matches!(
+                response,
+                syswatch_core::protocol::Response::Suggestions { .. }
+            )
+            .then(|| {
+                client::request(
+                    &path,
+                    syswatch_core::protocol::RequestCommand::Processes,
+                    client::TIMEOUT,
+                )
+                .ok()
+            })
+            .flatten();
+            output::render_suggestions(&response, processes.as_ref(), now_ms)
+        }
         args::Command::Help => return,
         args::Command::TopHelp => return,
+        args::Command::SuggestionsHelp => return,
     };
     match rendered {
         Ok(output) => println!("{output}"),
