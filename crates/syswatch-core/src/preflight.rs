@@ -18,8 +18,9 @@ use crate::snapshot::ProcessSnapshot;
 
 /// Action named by a preflight request.
 ///
-/// This is vocabulary only. It has no executor, no signal number, and no
-/// mapping to a system call. Naming an action here does not authorize it.
+/// This names an intent only. It carries no signal number and authorizes
+/// nothing. A separate action module decides whether one SIGTERM may be
+/// requested after a fresh allowed assessment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RequestedAction {
