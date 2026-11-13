@@ -203,6 +203,7 @@ dependencies = [
 name = "syswatch-daemon"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "signal-hook",
  "syswatch-core",
 ]

@@ -218,7 +218,8 @@ fn cpu_refresh_due(last: Option<Instant>, now: Instant) -> bool {
     })
 }
 
-fn timestamp_ms() -> u64 {
+/// Wall-clock milliseconds since the Unix epoch, the clock used by every snapshot.
+pub fn timestamp_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
