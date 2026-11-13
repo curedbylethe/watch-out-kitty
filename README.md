@@ -144,10 +144,10 @@ Warm-up and invalid CPU samples do not count; genuine zero readings can still
 be cold, so this evidence does not prove idleness. A process whose start time
 is unknown (zero) is not assessed as a candidate, because `(pid, start_time_secs)`
 is the identity and a matching PID or executable name does not establish it.
-This exclusion affects advice only: `syswatch status`, `syswatch top`, and the
-`processes` reply still show the process and its reported `start_time_secs`.
-Explanations omit process
-names; any renderer adding them must sanitize them as `report.rs` does. Findings
+This exclusion affects advice only. The `processes` reply and `syswatch top` still
+include the process; the reply keeps its reported `start_time_secs`. Explanations
+omit process names; any renderer adding them must sanitize them as `report.rs`
+does. Findings
 do not claim a process is safe or safe to terminate. The detector does not
 detect orphaned, stale, or abandoned processes and performs no process control.
 The daemon evaluates findings on process-sampling ticks and serves the cached
