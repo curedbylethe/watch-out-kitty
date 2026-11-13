@@ -68,7 +68,7 @@ only the served suggestions view omits dismissed findings.
 
 ## Process lifecycle policy
 
-The crate does not detect stale processes or terminate processes. Any future
+The crate does not detect stale processes and never forces termination; the action service can only request one SIGTERM. Any future
 stale-process detection must use evidence. Parent PID 1 alone does not show
 that a process is abandoned. Process termination requires explicit safeguards
 and confirmation. Advisory findings describe observed evidence and never
