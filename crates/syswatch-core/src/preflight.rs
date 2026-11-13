@@ -49,6 +49,8 @@ pub struct PreflightObservation<'a> {
     pub provenance: &'a BTreeMap<(u32, u64), ProcessProvenance>,
     /// When the scan was taken, in milliseconds.
     pub observed_at_ms: u64,
+    /// Identity of the monitor process, as the caller knows it. `None` when unknown.
+    pub monitor: Option<(u32, u64)>,
 }
 
 /// Outcome of a preflight assessment.
@@ -135,7 +137,11 @@ fn decide(
             vec![PreflightReason::NoObservation],
         );
     };
-    if request.now_ms.saturating_sub(observation.observed_at_ms) > request.max_observation_age_ms {
+    // A future-dated observation means mismatched clocks, not a fresh scan.
+    if observation.observed_at_ms > request.now_ms
+        || request.now_ms.saturating_sub(observation.observed_at_ms)
+            > request.max_observation_age_ms
+    {
         return (
             PreflightConclusion::NeedsFreshEvidence,
             vec![PreflightReason::StaleObservation],
@@ -156,8 +162,11 @@ fn decide(
         );
     }
 
-    let monitor = eligibility::monitor_identity(observation.provenance);
-    let assessment = eligibility::assess(finding.identity(), observation.provenance, monitor);
+    let assessment = eligibility::assess(
+        finding.identity(),
+        observation.provenance,
+        observation.monitor,
+    );
     match assessment.state {
         EligibilityState::Eligible => (PreflightConclusion::AllowedForConfirmation, Vec::new()),
         // Unknown is missing evidence, not permission, so it denies too.
@@ -175,6 +184,8 @@ fn decide(
 /// Renders a dry-run preview for people to read. Text only: it names the
 /// requested process and action and states that nothing was executed.
 pub fn preview(assessment: &PreflightAssessment, process: Option<&ProcessSnapshot>) -> String {
+    // A row with the same PID but another start time is a different process.
+    let process = process.filter(|process| process.identity() == assessment.finding.identity());
     let name = process.map_or_else(
         || "<unknown>".to_owned(),
         |process| sanitize_line(&process.name, 24),
@@ -309,8 +320,25 @@ mod tests {
             processes,
             provenance: &provenance,
             observed_at_ms,
+            monitor: None,
         };
         assess_with(target, Some(&observation))
+    }
+
+    /// Assesses finding (42, 1) against a fresh observation with the given monitor identity.
+    fn assess_monitored(
+        processes: &[ProcessSnapshot],
+        rows: Vec<ProcessProvenance>,
+        monitor: Option<(u32, u64)>,
+    ) -> PreflightAssessment {
+        let provenance = scan(rows);
+        let observation = PreflightObservation {
+            processes,
+            provenance: &provenance,
+            observed_at_ms: OBSERVED_MS,
+            monitor,
+        };
+        assess_with(finding(42, 1), Some(&observation))
     }
 
     /// Assesses finding (42, 1) against a fresh observation.
@@ -378,6 +406,18 @@ mod tests {
     }
 
     #[test]
+    fn future_dated_observation_needs_fresh_evidence() {
+        let result = assess_at(
+            finding(42, 1),
+            &[process(42, 1)],
+            vec![provenance(42, 1, Some(501), ParentContext::NoParent, None)],
+            NOW_MS + 1,
+        );
+        assert_eq!(result.conclusion, PreflightConclusion::NeedsFreshEvidence);
+        assert_eq!(result.reasons, vec![PreflightReason::StaleObservation]);
+    }
+
+    #[test]
     fn zero_start_time_is_unverifiable() {
         let result = assess_at(
             finding(42, 0),
@@ -422,12 +462,10 @@ mod tests {
 
     #[test]
     fn monitor_process_is_denied() {
-        let pid = std::process::id();
-        let result = assess_at(
-            finding(pid, 1),
-            &[process(pid, 1)],
-            vec![provenance(pid, 1, Some(501), ParentContext::NoParent, None)],
-            OBSERVED_MS,
+        let result = assess_monitored(
+            &[process(42, 1)],
+            vec![provenance(42, 1, Some(501), ParentContext::NoParent, None)],
+            Some((42, 1)),
         );
         assert_eq!(result.conclusion, PreflightConclusion::Denied);
         assert_eq!(
@@ -440,8 +478,7 @@ mod tests {
 
     #[test]
     fn monitor_ancestor_is_denied() {
-        let monitor_pid = std::process::id();
-        let result = assess_rows(
+        let result = assess_monitored(
             &[process(42, 1)],
             vec![
                 provenance(
@@ -449,13 +486,14 @@ mod tests {
                     1,
                     Some(501),
                     ParentContext::Resolved {
-                        pid: monitor_pid,
+                        pid: 99,
                         start_time_secs: 7,
                     },
                     None,
                 ),
-                provenance(monitor_pid, 7, Some(501), ParentContext::NoParent, None),
+                provenance(99, 7, Some(501), ParentContext::NoParent, None),
             ],
+            Some((99, 7)),
         );
         assert_eq!(result.conclusion, PreflightConclusion::Denied);
         assert_eq!(
@@ -659,6 +697,7 @@ mod tests {
             processes: &processes,
             provenance: &provenance_map,
             observed_at_ms: OBSERVED_MS,
+            monitor: None,
         };
         let first = assess(&request(finding(42, 1)), Some(&observation));
         let second = assess(&request(finding(42, 1)), Some(&observation));
@@ -709,6 +748,18 @@ mod tests {
              reason: no process observation was supplied\n\
              nothing was executed; no signal was sent"
         );
+    }
+
+    #[test]
+    fn preview_ignores_a_row_with_a_reused_pid() {
+        let result = assess_rows(
+            &[process(42, 2)],
+            vec![provenance(42, 1, Some(501), ParentContext::NoParent, None)],
+        );
+        assert_eq!(result.reasons, vec![PreflightReason::IdentityReused]);
+        let mut other = process(42, 2);
+        other.name = "sshd".to_string();
+        assert!(preview(&result, Some(&other)).starts_with("process: 42-1-cpu (<unknown>)\n"));
     }
 
     #[test]
