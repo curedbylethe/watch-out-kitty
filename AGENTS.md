@@ -67,6 +67,12 @@ identity `(pid, start_time_secs, kind)` and expires when that
 inherits a dismissal. The registry is bounded. The cached findings stay raw;
 only the served suggestions view omits dismissed findings.
 
+Alert eligibility state is in-memory and daemon-lifetime only. A finding absent
+from a process tick loses its cooldown, so its return alerts as new.
+`alert_events()` holds only the events of the latest tick that carried
+suggestions, is never sent on the wire, and is replaced on the next such tick.
+A consumer that polls slower than the process tick misses intermediate events.
+
 ## Process lifecycle policy
 
 The crate does not detect stale processes and never forces termination; the action service can only request one SIGTERM. Any future
