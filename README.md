@@ -17,6 +17,7 @@ cargo run -p syswatch-cli -- status
 cargo run -p syswatch-cli -- top
 cargo run -p syswatch-cli -- suggestions
 cargo run -p syswatch-cli -- inspect 42-1700000000-memory
+cargo run -p syswatch-cli -- close 42-1700000000-memory   # needs an interactive terminal
 ```
 
 The example prints one snapshot of aggregate CPU, physical memory, and the
@@ -28,6 +29,8 @@ exits with status 2 for invalid command-line arguments. `syswatch top` prints
 cached process data ranked by memory (default) or CPU. Use `--sort memory|cpu`
 to choose order and `--limit N` to set a positive row limit (default 10).
 `status` and `top` use exit code 1 for runtime errors and 2 for usage errors.
+`close` exits 0 only when the daemon accepted a SIGTERM request; see
+[Requesting a graceful stop](#requesting-a-graceful-stop).
 Ctrl-C (SIGINT) or SIGTERM stops it cleanly, prints `syswatch-daemon: stopped`,
 and exits with status 0. CI currently runs on Ubuntu 24.04.
 
@@ -39,12 +42,16 @@ reads cached replies only and never scans processes. Before the daemon has enoug
 history it prints `still collecting evidence: …`; when no finding qualifies it
 prints `(no current suggestions)`. Both exit with status 0. Daemon and IPC
 failures exit with status 1, and invalid arguments exit with status 2. The command
-offers no process action; a finding invites inspection.
+requests no process action; a finding invites inspection or an explicitly
+confirmed `close`.
 
 `syswatch inspect <reference>` prints the cached evidence for one finding, selected by its full
 reference `<pid>-<start_time_secs>-<kind>`. It exits with status 1 when the daemon is unavailable or
 the finding is no longer cached, and with status 2 for a malformed reference. It reads cached replies
 only and never scans processes.
+
+`syswatch close <reference>` previews one finding and, only after you type `yes`, asks the
+daemon to request one SIGTERM. See [Requesting a graceful stop](#requesting-a-graceful-stop).
 
 ### Daemon socket
 
@@ -58,8 +65,9 @@ request line per connection; the server closes the connection after its reply.
 ## Current scope
 
 This repository contains the telemetry crate, snapshot example, foreground
-daemon, and `syswatch status`, `syswatch top`, `syswatch suggestions`, and `syswatch inspect`
-commands, and the core exposes a dry-run process-action preflight and an action service that can request one SIGTERM; no command uses either yet. The daemon evaluates advisory findings on process-sampling ticks,
+daemon, and `syswatch status`, `syswatch top`, `syswatch suggestions`, `syswatch inspect`,
+and `syswatch close`
+commands, and `syswatch close`, the only command that can request a process action. The daemon evaluates advisory findings on process-sampling ticks,
 caches them separately from aggregate telemetry, and serves them through the
 read-only `suggestions` request. No Kitty indicator shows them yet. A background
 service is planned. See the
@@ -99,9 +107,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-core/src/preflight.rs` | Dry-run process-action assessment and preview |
 | `crates/syswatch-core/src/action.rs` | Typed action service; requests one SIGTERM after a fresh allowed preflight |
 | `crates/syswatch-core/src/alerts.rs` | Alert eligibility policy with a fixed cooldown |
-| `crates/syswatch-core/src/protocol.rs` | Versioned read-only monitoring protocol |
+| `crates/syswatch-core/src/protocol.rs` | Versioned protocol: monitoring requests are read-only; close requests are the only action requests |
 | `crates/syswatch-core/examples/snapshot.rs` | One-time snapshot example |
 | `crates/syswatch-daemon` | Foreground monitoring daemon |
+| `crates/syswatch-daemon/src/action.rs` | Daemon close handler: preview and guarded confirmation from the latest scan |
 | `crates/syswatch-daemon/src/clock.rs` | Interruptible monotonic clock |
 | `crates/syswatch-daemon/src/ipc.rs` | Unix socket server |
 | `crates/syswatch-daemon/src/scheduler.rs` | Independent sampling schedule |
@@ -112,7 +121,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 | `crates/syswatch-daemon/src/sampler.rs` | Collector, process history, and advisory evaluation |
 | `crates/syswatch-daemon/src/signals.rs` | SIGINT and SIGTERM handling |
 | `crates/syswatch-daemon/tests` | End-to-end daemon and socket tests |
-| `crates/syswatch-cli` | Status, process-ranking, and advisory-inspection command-line client |
+| `crates/syswatch-cli` | Status, process-ranking, advisory-inspection, and confirmed-close command-line client |
 | `crates/syswatch-cli/src/args.rs` | Command-line argument parsing |
 | `crates/syswatch-cli/src/client.rs` | Daemon IPC client |
 | `crates/syswatch-cli/src/main.rs` | Command dispatch and process entry point |
@@ -210,12 +219,64 @@ supplies its real UID. A requested signal does not mean the process exited. The 
 applies the signal to whichever process holds the PID when the signal is sent;
 macOS has no `pidfd`, so identity-safe signalling is not atomic. Prohibited:
 SIGKILL, escalation, retry, force, sudo, bulk actions, and advisor-triggered
-actions. The preflight performs no lookup of its own and adds no request or
-reply, so protocol version `1` is unchanged.
+actions. The preflight performs no lookup of its own. The close requests carry its
+typed result over the socket, and protocol version `1` is unchanged.
 
 The preview prints the same finding reference that `suggestions` and `inspect`
-use, described above, and states that nothing was executed. No command uses
-preflight or the action service yet.
+use, described above, and states that nothing was executed.
+
+### Requesting a graceful stop
+
+`syswatch close <pid>-<start_time_secs>-<kind>` is the only command that can lead to
+a signal. The reference is the complete finding identity, as in `inspect`. A PID
+alone, a list number, or an unspecified target is a usage error (exit 2). The
+command has no `--yes`, `--force`, `--all`, or `--kill` option.
+
+Flow:
+
+1. Without an interactive terminal on stdin, the command exits 1 before it
+   connects to the daemon.
+2. The daemon runs the preflight on its latest cached scan and returns a preview:
+   the reference, process name, owner UID when known, verdict, reasons,
+   observation age, and the line `nothing was executed; no signal was sent`.
+   Evidence older than two process intervals (10 seconds at the default
+   interval) is stale.
+3. A denied or stale preview ends with `aborted: no action was requested` and
+   exit 1. No prompt appears.
+4. Otherwise the command prints `Type yes to request SIGTERM for <reference>:`.
+   Only the exact line `yes` continues. Empty input, end of input, `y`, `YES`,
+   and padded input abort with exit 1 and send nothing more.
+5. The daemon revalidates the identity, the scan age, the monitor and ancestor
+   protection, and the owner UID at delivery. A reused PID, a changed scan, or
+   protected context denies without a signal. The daemon requests at most one
+   SIGTERM.
+
+A finding that the daemon no longer caches is reported as `not_found`.
+
+Exit codes:
+
+| Exit | Meaning |
+| :--- | :--- |
+| 0 | The daemon accepted a SIGTERM request. This is not confirmed exit. |
+| 1 | Aborted, denied, failed, already exited, not found, unavailable, or a connection or protocol error. |
+| 2 | Usage error. |
+
+Output for an accepted request states `signal requested: SIGTERM`, names the process,
+and says that the daemon accepted the request but did not confirm an exit. Run
+`syswatch inspect <reference>` to check again.
+
+Failure modes that exit 1: cancellation at the prompt, end of input, non-terminal
+stdin, stale evidence, a finding that is no longer cached, PID reuse, protected
+or monitor context, a different owner UID, a permission refusal from the operating
+system, a daemon that is down, and an older daemon that answers
+`unsupported_command`.
+
+Safety limits. The command sends at most one SIGTERM per run. It never sends
+SIGKILL, retries, escalates, uses sudo, or acts on several processes. Background
+sampling, advisory findings, and any Kitty rendering stay read-only. A requested
+signal is not an exit: the kernel applies it to whichever process holds the PID at
+delivery, and macOS has no `pidfd` to close that gap. A dismissed finding can still
+be closed by its full reference; the preview shows its current evidence.
 
 ## Protocol
 
@@ -235,17 +296,24 @@ fields and command behavior are unchanged, older servers reply
 `unsupported_command`, and older clients never send the request.
 
 `syswatch inspect` reads the same cached reply and adds no request type; a finding reference is not a
-wire field and adds nothing to the reply.
+wire field and adds nothing to the reply. `syswatch close` adds two requests, `close_preview`
+and `close_confirm`. Each carries one complete `finding` object and nothing else. Monitoring
+requests reject a `finding` field. The close requests are additive, so the version remains
+`1`; an older daemon answers `unsupported_command`.
 
-The three read-only requests and example replies:
+The three monitoring requests, the two close requests, and example replies:
 
 ```text
 {"version":1,"command":"status"}
 {"version":1,"command":"processes"}
 {"version":1,"command":"suggestions"}
+{"version":1,"command":"close_preview","finding":{"pid":42,"start_time_secs":1700000000,"kind":"memory"}}
+{"version":1,"command":"close_confirm","finding":{"pid":42,"start_time_secs":1700000000,"kind":"memory"}}
 {"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":42.5,"cpu_updated_at_ms":1700000000123,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":2,"processes_updated_at_ms":1700000000100}
 {"kind":"processes","version":1,"observed_at_ms":1700000000123,"processes_updated_at_ms":1700000000100,"processes":[{"pid":42,"parent_pid":1,"name":"worker","cpu_usage_percent":12.5,"memory_bytes":4096,"start_time_secs":1700000000}]}
 {"kind":"suggestions","version":1,"evaluated_at_ms":7,"processes_updated_at_ms":6,"findings":[]}
+{"kind":"close_preview","version":1,"assessment":{...},"process":{...}}
+{"kind":"close_result","version":1,"outcome":"sigterm_requested"}
 {"kind":"error","version":1,"code":"unsupported_version","message":"unsupported protocol version 2; this server speaks 1"}
 {"kind":"error","version":1,"code":"unsupported_command","message":"unsupported command \"kill\""}
 {"kind":"error","version":1,"code":"malformed_request","message":"request is not a JSON object with integer version and string command"}
@@ -271,9 +339,14 @@ error before enough history is collected; `findings` is never `null`.
 | `unsupported_command` | Request names an unsupported command. |
 | `malformed_request` | Request line is malformed or too large. |
 | `unavailable` | Requested data has not been collected yet. |
+| `not_found` | The finding identity is not among the current advisory findings. |
 
-The protocol has no filesystem paths, process-control operations, authentication,
-remote access, history request, retained-observation payload, or write requests.
+The transport is local: the owner-only socket (`0600`, inside a `0700` directory) is
+the only access control, with no authentication layer and no remote access. The
+monitoring requests are read-only and take no arguments. The close requests are
+the only process-control operations, and they carry only one finding identity.
+The protocol has no filesystem paths, argv, environment data, history request,
+retained-observation payload, or bulk command.
 A suggestions reply carries finding identity, confidence, timestamps,
 explanation, and aggregate numeric evidence; it contains no process names,
 paths, argv, or environment data. Types live in `syswatch_core::protocol`.
