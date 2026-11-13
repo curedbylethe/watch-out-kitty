@@ -14,6 +14,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use syswatch_core::FindingId;
 use syswatch_core::protocol::{
     ErrorCode, MAX_REQUEST_BYTES, ProtocolError, RequestCommand, Response, decode_request,
     encode_line,
@@ -55,9 +56,12 @@ impl ServerHandle {
     }
 }
 
-pub fn start<F>(path: PathBuf, latest: F) -> io::Result<ServerHandle>
+/// Starts the socket server. `latest` serves monitoring requests. `action`
+/// answers the close requests for one complete finding identity.
+pub fn start<F, A>(path: PathBuf, latest: F, action: A) -> io::Result<ServerHandle>
 where
     F: Fn() -> Cached + Send + Sync + 'static,
+    A: Fn(RequestCommand, FindingId) -> Response + Send + Sync + 'static,
 {
     if !path.is_absolute() || path.parent().is_none() {
         return Err(io::Error::new(
@@ -144,9 +148,10 @@ where
     let shutdown = Arc::new(AtomicBool::new(false));
     let server_shutdown = Arc::clone(&shutdown);
     let latest = Arc::new(latest);
+    let action = Arc::new(action);
     let accept_thread = match thread::Builder::new()
         .name("syswatch-socket".into())
-        .spawn(move || accept_loop(listener, server_shutdown, latest))
+        .spawn(move || accept_loop(listener, server_shutdown, latest, action))
     {
         Ok(thread) => thread,
         Err(error) => {
@@ -169,9 +174,14 @@ fn in_use(path: &std::path::Path) -> io::Error {
     )
 }
 
-fn accept_loop<F>(listener: UnixListener, shutdown: Arc<AtomicBool>, latest: Arc<F>)
-where
+fn accept_loop<F, A>(
+    listener: UnixListener,
+    shutdown: Arc<AtomicBool>,
+    latest: Arc<F>,
+    action: Arc<A>,
+) where
     F: Fn() -> Cached + Send + Sync + 'static,
+    A: Fn(RequestCommand, FindingId) -> Response + Send + Sync + 'static,
 {
     let mut handlers: Vec<JoinHandle<()>> = Vec::new();
     while !shutdown.load(Ordering::SeqCst) {
@@ -186,9 +196,10 @@ where
         match listener.accept() {
             Ok((stream, _)) => {
                 let latest = Arc::clone(&latest);
+                let action = Arc::clone(&action);
                 if let Ok(handler) = thread::Builder::new()
                     .name("syswatch-socket-client".into())
-                    .spawn(move || handle_client(stream, &*latest))
+                    .spawn(move || handle_client(stream, &*latest, &*action))
                 {
                     handlers.push(handler);
                 }
@@ -226,9 +237,10 @@ impl Read for DeadlineReader<'_> {
     }
 }
 
-fn handle_client<F>(mut stream: UnixStream, latest: &F)
+fn handle_client<F, A>(mut stream: UnixStream, latest: &F, action: &A)
 where
     F: Fn() -> Cached,
+    A: Fn(RequestCommand, FindingId) -> Response,
 {
     if stream.set_nonblocking(false).is_err()
         || stream.set_write_timeout(Some(WRITE_TIMEOUT)).is_err()
@@ -250,29 +262,36 @@ where
                 line.pop();
             }
             match decode_request(&line) {
-                Ok(request) => {
-                    let cached = latest();
-                    match request.command {
-                        RequestCommand::Status => cached
+                Ok(request) => match request.command {
+                    RequestCommand::Status => {
+                        let cached = latest();
+                        cached
                             .snapshot
                             .as_ref()
-                            .map_or_else(snapshot_unavailable, Response::status),
-                        RequestCommand::Processes => cached
+                            .map_or_else(snapshot_unavailable, Response::status)
+                    }
+                    RequestCommand::Processes => {
+                        let cached = latest();
+                        cached
                             .snapshot
                             .as_ref()
-                            .map_or_else(snapshot_unavailable, Response::processes),
-                        RequestCommand::Suggestions => {
-                            Response::suggestions(cached.suggestions.as_ref())
-                        }
-                        // Served by the action handler in a later change.
-                        RequestCommand::ClosePreview | RequestCommand::CloseConfirm => {
-                            Response::error(ProtocolError {
-                                code: ErrorCode::UnsupportedCommand,
-                                message: "close requests are not served yet".into(),
-                            })
+                            .map_or_else(snapshot_unavailable, Response::processes)
+                    }
+                    RequestCommand::Suggestions => {
+                        let cached = latest();
+                        Response::suggestions(cached.suggestions.as_ref())
+                    }
+                    RequestCommand::ClosePreview | RequestCommand::CloseConfirm => {
+                        match request.finding {
+                            Some(finding) => action(request.command, finding),
+                            // decode_request rejects this pairing; kept as a typed reply.
+                            None => Response::error(ProtocolError {
+                                code: ErrorCode::MalformedRequest,
+                                message: "close requests require a finding object".into(),
+                            }),
                         }
                     }
-                }
+                },
                 Err(error) => Response::error(error),
             }
         }
@@ -306,6 +325,13 @@ mod tests {
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     };
     use syswatch_core::{MemorySnapshot, ProcessSnapshot, SuggestionsSnapshot, SystemSnapshot};
+
+    fn no_action(_: RequestCommand, _: FindingId) -> Response {
+        Response::error(ProtocolError {
+            code: ErrorCode::UnsupportedCommand,
+            message: "no action in this test".into(),
+        })
+    }
 
     struct TempDir(PathBuf);
 
@@ -363,10 +389,14 @@ mod tests {
     }
 
     fn server(path: PathBuf) -> ServerHandle {
-        start(path, || Cached {
-            snapshot: Some(snapshot()),
-            suggestions: None,
-        })
+        start(
+            path,
+            || Cached {
+                snapshot: Some(snapshot()),
+                suggestions: None,
+            },
+            no_action,
+        )
         .unwrap()
     }
 
@@ -411,7 +441,7 @@ mod tests {
     #[test]
     fn answers_unavailable_before_the_first_snapshot() {
         let dir = TempDir::new();
-        let server = start(dir.socket(), Cached::default).unwrap();
+        let server = start(dir.socket(), Cached::default, no_action).unwrap();
         for command in ["status", "processes"] {
             let line = request(
                 &dir.socket(),
@@ -426,14 +456,18 @@ mod tests {
     #[test]
     fn suggestions_are_served_from_the_cached_source() {
         let dir = TempDir::new();
-        let server = start(dir.socket(), || Cached {
-            snapshot: None,
-            suggestions: Some(SuggestionsSnapshot {
-                evaluated_at_ms: 7,
-                processes_updated_at_ms: 6,
-                findings: vec![],
-            }),
-        })
+        let server = start(
+            dir.socket(),
+            || Cached {
+                snapshot: None,
+                suggestions: Some(SuggestionsSnapshot {
+                    evaluated_at_ms: 7,
+                    processes_updated_at_ms: 6,
+                    findings: vec![],
+                }),
+            },
+            no_action,
+        )
         .unwrap();
         let line = request(
             &dir.socket(),
@@ -449,7 +483,7 @@ mod tests {
     #[test]
     fn suggestions_report_their_own_unavailable_state() {
         let dir = TempDir::new();
-        let server = start(dir.socket(), Cached::default).unwrap();
+        let server = start(dir.socket(), Cached::default, no_action).unwrap();
         let line = request(
             &dir.socket(),
             "{\"version\":1,\"command\":\"suggestions\"}\n",
@@ -467,10 +501,14 @@ mod tests {
         let dir = TempDir::new();
         let reads = Arc::new(AtomicUsize::new(0));
         let server_reads = Arc::clone(&reads);
-        let server = start(dir.socket(), move || {
-            server_reads.fetch_add(1, Ordering::SeqCst);
-            Cached::default()
-        })
+        let server = start(
+            dir.socket(),
+            move || {
+                server_reads.fetch_add(1, Ordering::SeqCst);
+                Cached::default()
+            },
+            no_action,
+        )
         .unwrap();
         request(
             &dir.socket(),
@@ -485,13 +523,17 @@ mod tests {
         let dir = TempDir::new();
         let reads = Arc::new(AtomicUsize::new(0));
         let server_reads = Arc::clone(&reads);
-        let server = start(dir.socket(), move || {
-            server_reads.fetch_add(1, Ordering::SeqCst);
-            Cached {
-                snapshot: Some(snapshot()),
-                suggestions: None,
-            }
-        })
+        let server = start(
+            dir.socket(),
+            move || {
+                server_reads.fetch_add(1, Ordering::SeqCst);
+                Cached {
+                    snapshot: Some(snapshot()),
+                    suggestions: None,
+                }
+            },
+            no_action,
+        )
         .unwrap();
         for _ in 0..2 {
             assert!(
@@ -508,10 +550,14 @@ mod tests {
         let dir = TempDir::new();
         let server = server(dir.socket());
         assert_eq!(
-            start(dir.socket(), || Cached {
-                snapshot: Some(snapshot()),
-                suggestions: None
-            })
+            start(
+                dir.socket(),
+                || Cached {
+                    snapshot: Some(snapshot()),
+                    suggestions: None
+                },
+                no_action
+            )
             .err()
             .unwrap()
             .kind(),
@@ -542,10 +588,14 @@ mod tests {
         let dir = TempDir::new();
         fs::write(dir.socket(), "keep").unwrap();
         assert!(
-            start(dir.socket(), || Cached {
-                snapshot: Some(snapshot()),
-                suggestions: None
-            })
+            start(
+                dir.socket(),
+                || Cached {
+                    snapshot: Some(snapshot()),
+                    suggestions: None
+                },
+                no_action
+            )
             .is_err()
         );
         assert_eq!(fs::read_to_string(dir.socket()).unwrap(), "keep");
@@ -571,10 +621,14 @@ mod tests {
         let dir = TempDir::new();
         fs::set_permissions(&dir.0, fs::Permissions::from_mode(0o755)).unwrap();
         assert_eq!(
-            start(dir.socket(), || Cached {
-                snapshot: Some(snapshot()),
-                suggestions: None
-            })
+            start(
+                dir.socket(),
+                || Cached {
+                    snapshot: Some(snapshot()),
+                    suggestions: None
+                },
+                no_action
+            )
             .err()
             .unwrap()
             .kind(),
