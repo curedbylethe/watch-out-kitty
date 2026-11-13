@@ -99,12 +99,19 @@ fn format_row(process: &ProcessSnapshot) -> String {
 }
 
 fn truncate_name(name: &str) -> String {
-    let name = if name.trim().is_empty() {
+    sanitize_field(name, 24)
+}
+
+/// Makes untrusted text safe for one terminal line: blank text becomes
+/// `<unknown>`, control characters become U+FFFD, and at most `max_chars`
+/// characters are kept.
+pub fn sanitize_field(text: &str, max_chars: usize) -> String {
+    let text = if text.trim().is_empty() {
         "<unknown>"
     } else {
-        name
+        text
     };
-    name.chars()
+    text.chars()
         .map(|character| {
             if character.is_control() {
                 '\u{fffd}'
@@ -112,7 +119,7 @@ fn truncate_name(name: &str) -> String {
                 character
             }
         })
-        .take(24)
+        .take(max_chars)
         .collect()
 }
 
@@ -120,7 +127,7 @@ fn truncate_name(name: &str) -> String {
 mod tests {
     use super::{
         ProcessSort, format_bytes, format_cpu_percent, format_process_age, render_table,
-        top_by_sort, truncate_name,
+        sanitize_field, top_by_sort, truncate_name,
     };
     use crate::snapshot::ProcessSnapshot;
 
@@ -260,5 +267,22 @@ mod tests {
     #[test]
     fn truncate_name_replaces_terminal_control_characters() {
         assert_eq!(truncate_name("a\u{1b}[2Jb\nc"), "a�[2Jb�c");
+    }
+
+    #[test]
+    fn sanitize_field_replaces_control_characters() {
+        assert_eq!(sanitize_field("a\u{1b}[2Jb\nc", 99), "a�[2Jb�c");
+    }
+
+    #[test]
+    fn sanitize_field_truncates_by_characters() {
+        assert_eq!(sanitize_field("猫".repeat(5).as_str(), 3), "猫猫猫");
+        assert_eq!(sanitize_field("abc", 0), "");
+    }
+
+    #[test]
+    fn sanitize_field_maps_blank_text_to_unknown() {
+        assert_eq!(sanitize_field("", 10), "<unknown>");
+        assert_eq!(sanitize_field("   ", 10), "<unknown>");
     }
 }
