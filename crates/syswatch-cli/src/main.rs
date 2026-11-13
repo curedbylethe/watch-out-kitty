@@ -189,6 +189,11 @@ fn run_close(reference: syswatch_core::findings::FindingId) -> i32 {
                 1
             }
         },
+        // Connect and encode fail before any byte is sent, so no hint for them.
+        Err(error @ (client::ClientError::Connect(_) | client::ClientError::Encode(_))) => {
+            eprintln!("syswatch: {error}");
+            1
+        }
         Err(error) => {
             eprintln!("syswatch: {error}");
             eprintln!(
