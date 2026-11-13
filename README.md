@@ -191,8 +191,8 @@ from ancestor evidence; missing ancestry is not evidence of detachment.
 ### Process-action preflight
 
 A preflight assesses one requested process action. It takes the full finding
-identity, a fresh process scan with provenance, the current time, and the
-caller's maximum observation age. It returns one of three outcomes: allowed for
+identity, a fresh process scan with provenance, the monitor's identity, the
+current time, and the caller's maximum observation age. It returns one of three outcomes: allowed for
 confirmation, denied, or needs fresh evidence. A zero start time, a missing or
 reused identity, and every protected, monitor, terminal, ownership, or
 incomplete-evidence result denies.
