@@ -78,6 +78,11 @@ from a process tick loses its cooldown, so its return alerts as new.
 suggestions, is never sent on the wire, and is replaced on the next such tick.
 A consumer that polls slower than the process tick misses intermediate events.
 
+The Kitty adapter caches `status` and `suggestions` in memory and refreshes
+them from one worker thread per Kitty process; drawing hooks only read the
+immutable cached view. The redraw timer is an isolated capability-checked shim,
+and without it updates occur only on Kitty-driven redraws.
+
 ## Process lifecycle policy
 
 The crate does not detect stale processes and never forces termination. It requests a signal only through the action service, and only for one explicitly confirmed finding identity. Advisory findings never request one. Any future
