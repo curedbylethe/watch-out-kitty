@@ -11,6 +11,7 @@ pub fn render_status(response: &Response, now_ms: u64) -> Result<String, String>
         aggregate,
         process_count,
         processes_updated_at_ms,
+        update,
         ..
     } = response
     else {
@@ -36,14 +37,32 @@ pub fn render_status(response: &Response, now_ms: u64) -> Result<String, String>
             format!("Processes: {count} (updated {age} ago)")
         },
     );
-    Ok(format!(
+    let mut rendered = format!(
         "CPU: {cpu}\nMemory: {} / {} ({})\n{}\nSampled: {} ago",
         format_bytes(aggregate.memory.used_bytes),
         format_bytes(aggregate.memory.total_bytes),
         format_cpu_percent(memory),
         processes,
         format_age_ms(now_ms, aggregate.timestamp_ms),
-    ))
+    );
+    rendered.push_str(&update_notice_line(update.as_ref()));
+    Ok(rendered)
+}
+
+/// One notice line for a newer release, or the empty string when the daemon
+/// reported none.
+fn update_notice_line(update: Option<&syswatch_core::UpdateNotice>) -> String {
+    let Some(notice) = update else {
+        return String::new();
+    };
+    let mut line = format!(
+        "\nupdate available: {} - syswatch update dismiss to stop notices",
+        report::sanitize_field(&notice.latest_version, 32)
+    );
+    if !notice.url.is_empty() {
+        line.push_str(&format!(" ({})", report::sanitize_field(&notice.url, 200)));
+    }
+    line
 }
 
 pub fn render_top(
@@ -424,6 +443,40 @@ mod tests {
         }
         let rendered = render_status(&response, 1).unwrap();
         assert!(rendered.contains("Memory: 42 B / 0 B (0.0%)"));
+    }
+
+    #[test]
+    fn renders_one_notice_line_only_when_a_notice_is_present() {
+        let plain = render_status(&status(Some(1), Some(3)), 1_700_000_000_523).unwrap();
+        assert!(!plain.contains("update available"), "{plain}");
+
+        let mut noticed = status(Some(1), Some(3));
+        if let Response::Status { update, .. } = &mut noticed {
+            *update = Some(syswatch_core::UpdateNotice {
+                latest_version: "1.2.3".to_owned(),
+                url: "https://example.invalid/releases/v1.2.3".to_owned(),
+            });
+        }
+        let rendered = render_status(&noticed, 1_700_000_000_523).unwrap();
+        assert_eq!(
+            rendered.lines().last(),
+            Some(
+                "update available: 1.2.3 - syswatch update dismiss to stop notices (https://example.invalid/releases/v1.2.3)"
+            )
+        );
+        assert_eq!(rendered.matches("update available").count(), 1);
+
+        let mut url_less = status(Some(1), Some(3));
+        if let Response::Status { update, .. } = &mut url_less {
+            *update = Some(syswatch_core::UpdateNotice {
+                latest_version: "2.0.0".to_owned(),
+                url: String::new(),
+            });
+        }
+        assert_eq!(
+            render_status(&url_less, 1).unwrap().lines().last(),
+            Some("update available: 2.0.0 - syswatch update dismiss to stop notices")
+        );
     }
 
     #[test]

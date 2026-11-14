@@ -13,6 +13,7 @@ Commands:
   suggestions  Show cached advisory findings for review; never acts on a process
   inspect  Explain one cached advisory finding (pid-start_time_secs-kind)
   close  Preview one finding, then request SIGTERM after you type yes
+  update  Dismiss the update notice printed by status
   version  Print the version and exit
   help    Show this help
 
@@ -58,6 +59,17 @@ Arguments:
 Options:
   -h, --help           Show this help";
 
+pub const UPDATE_USAGE: &str = "Usage: syswatch update <COMMAND>
+
+Sub-commands for the update notice printed by status. Dismissal is durable
+across restarts until a newer version appears.
+
+Commands:
+  dismiss  Silence the current update notice
+
+Options:
+  -h, --help  Show this help";
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Status,
@@ -69,6 +81,8 @@ pub enum Command {
     InspectHelp,
     Close { reference: FindingId },
     CloseHelp,
+    UpdateDismiss,
+    UpdateHelp,
     Version,
     Help,
 }
@@ -79,6 +93,10 @@ fn usage_error(message: &str) -> String {
 
 fn close_usage_error(message: &str) -> String {
     format!("{CLOSE_USAGE}\n\nsyswatch: {message}")
+}
+
+fn update_usage_error(message: &str) -> String {
+    format!("{UPDATE_USAGE}\n\nsyswatch: {message}")
 }
 
 pub fn parse(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Command, String> {
@@ -97,7 +115,25 @@ pub fn parse(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
         "suggestions" => parse_suggestions(args),
         "inspect" => parse_inspect(args),
         "close" => parse_close(args),
+        "update" => parse_update(args),
         other => Err(usage_error(&format!("unrecognized command: {other}"))),
+    }
+}
+
+fn parse_update(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Command, String> {
+    let mut args = args.into_iter();
+    let Some(first) = args.next() else {
+        return Err(update_usage_error("update requires a sub-command"));
+    };
+    let first = first.to_string_lossy();
+    match first.as_ref() {
+        "-h" | "--help" if args.next().is_none() => Ok(Command::UpdateHelp),
+        "-h" | "--help" => Err(update_usage_error("update help accepts no arguments")),
+        "dismiss" if args.next().is_none() => Ok(Command::UpdateDismiss),
+        "dismiss" => Err(update_usage_error("update dismiss accepts no arguments")),
+        other => Err(update_usage_error(&format!(
+            "unrecognized update sub-command: {other}"
+        ))),
     }
 }
 
@@ -251,7 +287,8 @@ fn parse_top(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
 #[cfg(test)]
 mod tests {
     use super::{
-        CLOSE_USAGE, Command, INSPECT_USAGE, SUGGESTIONS_USAGE, TOP_USAGE, USAGE, VERSION, parse,
+        CLOSE_USAGE, Command, INSPECT_USAGE, SUGGESTIONS_USAGE, TOP_USAGE, UPDATE_USAGE, USAGE,
+        VERSION, parse,
     };
     const USAGE_MARKER: &str = "syswatch:";
     use syswatch_core::{
@@ -475,6 +512,50 @@ mod tests {
         assert_eq!(parse(args(&["help", "close"])), Ok(Command::CloseHelp));
         assert!(CLOSE_USAGE.contains("<finding-reference>"));
         assert!(CLOSE_USAGE.contains("yes"));
+    }
+
+    #[test]
+    fn update_dismiss_is_accepted_and_listed_in_usage() {
+        assert_eq!(
+            parse(args(&["update", "dismiss"])),
+            Ok(Command::UpdateDismiss)
+        );
+        assert!(USAGE.contains("  update  "), "{USAGE}");
+        assert!(UPDATE_USAGE.contains("Usage: syswatch update <COMMAND>"));
+        assert!(UPDATE_USAGE.contains("  dismiss  "), "{UPDATE_USAGE}");
+    }
+
+    #[test]
+    fn update_help_is_recognized() {
+        for spelling in ["-h", "--help"] {
+            assert_eq!(parse(args(&["update", spelling])), Ok(Command::UpdateHelp));
+        }
+    }
+
+    #[test]
+    fn update_rejects_missing_extra_and_unknown_sub_commands() {
+        let error = parse(args(&["update"])).unwrap_err();
+        assert!(error.contains(UPDATE_USAGE), "{error}");
+        assert!(error.contains("update requires a sub-command"), "{error}");
+
+        for values in [
+            &["update", "dismiss", "extra"][..],
+            &["update", "--help", "dismiss"],
+            &["update", "check"],
+        ] {
+            let error = parse(args(values)).unwrap_err();
+            assert!(error.contains(UPDATE_USAGE), "{values:?}: {error}");
+        }
+        assert!(
+            parse(args(&["update", "check"]))
+                .unwrap_err()
+                .contains("unrecognized update sub-command: check")
+        );
+        assert!(
+            parse(args(&["update", "dismiss", "extra"]))
+                .unwrap_err()
+                .contains("update dismiss accepts no arguments")
+        );
     }
 
     #[test]

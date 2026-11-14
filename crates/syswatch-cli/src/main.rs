@@ -22,7 +22,12 @@ fn main() {
             println!("{}", args::CLOSE_USAGE);
             return;
         }
+        args::Command::UpdateHelp => {
+            println!("{}", args::UPDATE_USAGE);
+            return;
+        }
         args::Command::Status => syswatch_core::protocol::RequestCommand::Status,
+        args::Command::UpdateDismiss => syswatch_core::protocol::RequestCommand::Status,
         args::Command::Top { .. } => syswatch_core::protocol::RequestCommand::Processes,
         args::Command::Suggestions => syswatch_core::protocol::RequestCommand::Suggestions,
         args::Command::Inspect { .. } => syswatch_core::protocol::RequestCommand::Suggestions,
@@ -68,6 +73,7 @@ fn main() {
         .min(u64::MAX as u128) as u64;
     let rendered = match command {
         args::Command::Status => output::render_status(&response, now_ms),
+        args::Command::UpdateDismiss => dismiss_update(&response),
         args::Command::Top { sort, limit } => output::render_top(&response, sort, limit, now_ms),
         args::Command::Suggestions => {
             // Best-effort name join; a failure only leaves names as <unknown>.
@@ -95,6 +101,7 @@ fn main() {
         args::Command::TopHelp => return,
         args::Command::SuggestionsHelp => return,
         args::Command::InspectHelp => return,
+        args::Command::UpdateHelp => return,
         args::Command::Close { .. } | args::Command::CloseHelp => return,
     };
     match rendered {
@@ -218,9 +225,146 @@ fn confirmed(line: &str) -> bool {
     line == "yes"
 }
 
+/// Writes the dismissal for the notice in a status reply and returns the line
+/// to print. Without a notice it writes nothing and resolves no state path.
+#[cfg(unix)]
+fn dismiss_update(response: &syswatch_core::protocol::Response) -> Result<String, String> {
+    let notice = match response {
+        syswatch_core::protocol::Response::Status { update, .. } => update.as_ref(),
+        _ => return Err("invalid response from daemon: expected status response".to_owned()),
+    };
+    let Some(notice) = notice else {
+        return Ok(NO_UPDATE_TO_DISMISS.to_owned());
+    };
+    let version = syswatch_core::update::parse_tag(&notice.latest_version).ok_or_else(|| {
+        format!(
+            "invalid update version from daemon: {}",
+            notice.latest_version
+        )
+    })?;
+    let path = syswatch_core::update::state_path().map_err(|error| error.to_string())?;
+    dismiss_at(&path, version)
+}
+
+/// Prints when the daemon reported no newer release.
+#[cfg(unix)]
+const NO_UPDATE_TO_DISMISS: &str = "no update to dismiss";
+
+/// Writes one version to the state file and returns the confirmation line.
+#[cfg(unix)]
+fn dismiss_at(
+    path: &std::path::Path,
+    version: syswatch_core::update::Version,
+) -> Result<String, String> {
+    syswatch_core::update::save_state(path, &version).map_err(|error| error.to_string())?;
+    Ok(format!("dismissed update notice for {version}"))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::confirmed;
+    use super::{confirmed, dismiss_at, dismiss_update};
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+    };
+    use syswatch_core::{
+        AggregateSnapshot, MemorySnapshot,
+        protocol::{PROTOCOL_VERSION, Response},
+        update::{STATE_VERSION_KEY, Version, load_state},
+    };
+
+    fn status_with(update: Option<syswatch_core::UpdateNotice>) -> Response {
+        Response::Status {
+            version: PROTOCOL_VERSION,
+            aggregate: AggregateSnapshot {
+                timestamp_ms: 0,
+                cpu_usage_percent: 0.0,
+                cpu_updated_at_ms: None,
+                memory: MemorySnapshot {
+                    total_bytes: 0,
+                    used_bytes: 0,
+                },
+            },
+            process_count: None,
+            processes_updated_at_ms: None,
+            build_version: None,
+            update,
+        }
+    }
+
+    fn notice(latest_version: &str) -> syswatch_core::UpdateNotice {
+        syswatch_core::UpdateNotice {
+            latest_version: latest_version.to_owned(),
+            url: "https://example.invalid/releases".to_owned(),
+        }
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "syswatch-cli-dismiss-{}-{name}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("temp dir creates");
+        dir
+    }
+
+    #[test]
+    fn dismiss_without_a_notice_says_so() {
+        assert_eq!(
+            dismiss_update(&status_with(None)).unwrap(),
+            "no update to dismiss"
+        );
+    }
+
+    #[test]
+    fn dismiss_rejects_an_unparseable_daemon_version() {
+        let error = dismiss_update(&status_with(Some(notice("not-a-version")))).unwrap_err();
+        assert!(
+            error.contains("invalid update version from daemon: not-a-version"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn dismiss_writes_one_key_and_one_confirmation_line() {
+        let dir = temp_dir("write");
+        let path = dir.join("update.json");
+        let version = Version {
+            major: 1,
+            minor: 2,
+            patch: 3,
+        };
+        assert_eq!(
+            dismiss_at(&path, version).unwrap(),
+            "dismissed update notice for 1.2.3"
+        );
+        assert_eq!(load_state(&path), Some(version));
+        let body = fs::read_to_string(&path).expect("state file is readable");
+        let value: serde_json::Value = serde_json::from_str(&body).expect("state file is JSON");
+        let object = value.as_object().expect("state file is an object");
+        assert_eq!(object.len(), 1);
+        assert_eq!(object.get(STATE_VERSION_KEY), Some(&"1.2.3".into()));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dismiss_at_reports_an_unwritable_path() {
+        let dir = temp_dir("unwritable");
+        let blocking: &Path = &dir.join("file");
+        fs::write(blocking, b"x").expect("blocking file writes");
+        let error = dismiss_at(
+            &blocking.join("update.json"),
+            Version {
+                major: 1,
+                minor: 0,
+                patch: 0,
+            },
+        )
+        .unwrap_err();
+        assert!(!error.is_empty(), "{error}");
+        let _ = fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn only_exact_yes_confirms() {
