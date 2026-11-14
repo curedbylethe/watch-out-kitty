@@ -132,6 +132,8 @@ Kitty does not render a hidden, minimized, or fully covered window. A change mad
 
 A dash is not a measurement.
 
+No value appears until `syswatch-daemon` is running; the tab bar reads its cached replies and starts nothing. Polling starts with the first bar draw, so with the default `tab_bar_min_tabs 2` it begins when a second tab opens. Until the first reply, the bar shows `CPU --  RAM --`. The advisory marker shows `!?` while the advisory list has no answer yet, which lasts about two minutes after a daemon start; see [Kitty cache and refresh](#kitty-cache-and-refresh).
+
 #### Advisory badge
 
 The tab bar adds a marker after the status text, two spaces apart: `CPU 18%  RAM 42%  !2`. The marker reads only the cached advisory list that `syswatch suggestions` prints.
