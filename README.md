@@ -69,9 +69,8 @@ daemon, and `syswatch status`, `syswatch top`, `syswatch suggestions`, `syswatch
 and `syswatch close`
 commands. `syswatch close` is the only command that can request a process action. The daemon evaluates advisory findings on process-sampling ticks,
 caches them separately from aggregate telemetry, and serves them through the
-read-only `suggestions` request. A Kitty tab bar shows CPU and RAM; it does not
-show advisory findings, which are planned in
-[issue #69](https://github.com/curedbylethe/watch-out-kitty/issues/69). A background
+read-only `suggestions` request. A Kitty tab bar shows CPU and RAM and a passive
+count of the current findings; it shows no finding details. A background
 service is planned. See the
 [issue tracker](https://github.com/curedbylethe/watch-out-kitty/issues) for
 planned work and [issue #13](https://github.com/curedbylethe/watch-out-kitty/issues/13)
@@ -133,6 +132,44 @@ Kitty does not render a hidden, minimized, or fully covered window. A change mad
 
 A dash is not a measurement.
 
+#### Advisory badge
+
+The tab bar adds a marker after the status text, two spaces apart: `CPU 18%  RAM 42%  !2`. The marker reads only the cached advisory list that `syswatch suggestions` prints.
+
+| Cached suggestions | Right edge |
+| :--- | :--- |
+| fresh, one or more findings | `CPU 18%  RAM 42%  !2` |
+| fresh, no findings | `CPU 18%  RAM 42%` |
+| stale, last known count 2 | `CPU 18%  RAM 42%  !~2` |
+| stale, last known count 0 | `CPU 18%  RAM 42%  !~0` |
+| pending evidence or unknown advisory state | `CPU 18%  RAM 42%  !?` |
+| daemon unavailable | `syswatch offline` |
+
+`!N` is a current count. `!~N` is a retained count that is stale, so it is not a current count. `!?` means the advisory list has no current answer yet, for example while the daemon warms up. A fresh empty list shows no marker. The count never exceeds 64, the daemon's cap on the served list.
+
+The marker is passive. It never opens a popup or notification, sends a signal, dismisses a finding, or runs `syswatch close`. It shows a count and a state only, never a process name, path, argument, explanation, or finding reference. No command in this tool dismisses a finding, so the marker changes only when the served list changes. The marker is not clickable; use the keyboard mappings below.
+
+If the whole text does not fit, the whole indicator is hidden; the marker is never cut off on its own. The last tab's title is shortened with Kitty's `…` to leave room for the widest text, `CPU ~100%  RAM ~100%  !~64`, but only when at least nine columns remain for the title. That room stays reserved while no marker is shown. If the title cannot be shortened, the indicator is hidden rather than drawn over the title.
+
+#### Keyboard shortcuts for advisory findings
+
+These optional mappings open the advisory output from the keyboard. No key is bound by default. Add them to `kitty.conf`:
+
+```conf
+map kitty_mod+alt+g launch --type=overlay --title "syswatch suggestions" --hold syswatch suggestions
+
+map kitty_mod+alt+i launch --type=overlay --title "syswatch inspect" sh -c 'printf "finding reference: "; read -r ref; syswatch inspect "$$ref"; printf "\nPress Enter to close"; read -r dummy'
+```
+
+`kitty_mod` is `ctrl+shift` by default, so the keys are Ctrl+Shift+Alt+G and Ctrl+Shift+Alt+I. Both are unbound in stock Kitty.
+
+- The first mapping opens `syswatch suggestions` in an overlay. `--hold` keeps the overlay at a shell prompt. Close it with `ctrl+shift+w`, or type `exit`.
+- The second mapping prompts for a reference, runs `syswatch inspect` on it, and waits for Enter. Copy the reference from the `syswatch suggestions` output; it has the form `<pid>-<start_time_secs>-<kind>`. `$$ref` is correct: Kitty consumes one `$`, so the shell receives `$ref`.
+
+Neither key touches a process. Neither mapping sends a signal or runs `syswatch close`.
+
+`launch` does not run a login shell, so `syswatch` must be on the PATH that Kitty inherits. If it is not, replace `syswatch` in both lines with the binary's absolute path, for example `/path/to/syswatch`.
+
 To install, symlink `kitty/tab_bar.py` as `tab_bar.py` in the directory of the `kitty.conf` that Kitty loads. By default that is `~/.config/kitty`, or the directory named by `KITTY_CONFIG_DIRECTORY`. Use a symlink, not a copy: the file finds the adapter modules next to its real path. Kitty loads `tab_bar.py` once, so restart Kitty after you install it.
 
 Set these options in `kitty.conf`:
@@ -149,7 +186,7 @@ tab_bar_min_tabs 1
 
 Limits:
 
-- The last tab's title is shortened with Kitty's `…` to leave room for the text plus one free column, and only when at least nine columns remain for the title. The indicator is hidden, never truncated, only when there is still no room, for example with many tabs.
+- The last tab's title is shortened with Kitty's `…` to leave room for the widest text, including an advisory marker, plus one free column, and only when at least nine columns remain for the title. The indicator is hidden, never truncated, only when there is still no room, for example with many tabs.
 - When tabs overflow the bar, the indicator is hidden.
 - `tab_bar_align` must stay `start` (the default); `center` and `end` shift the finished line and can clip the text.
 - The indicator is not clickable.
@@ -200,8 +237,8 @@ Kitty loads one `tab_bar.py` per config directory. If you already have one, do n
 | `kitty/syswatch_transport.py` | Nonblocking one-request socket state machine with a whole-request deadline |
 | `kitty/syswatch_refresh.py` | Main-loop timer chain that drives the cache; no threads |
 | `kitty/syswatch_redraw.py` | Tab-bar repaint timer on non-public Kitty symbols, with a fallback |
-| `kitty/tab_bar.py` | Installable Kitty tab bar: Kitty's tab drawing plus the CPU/RAM indicator |
-| `kitty/syswatch_indicator.py` | Indicator text from the cached view; pure, no I/O |
+| `kitty/tab_bar.py` | Installable Kitty tab bar: Kitty's tab drawing plus the CPU/RAM indicator and advisory marker |
+| `kitty/syswatch_indicator.py` | Indicator and advisory-marker text from the cached view; pure, no I/O |
 | `kitty/test_*.py` | Python client tests (`unittest`) |
 | `.github/workflows/ci.yml` | Ubuntu build checks |
 | `LICENSE` | Apache-2.0 license |
@@ -266,7 +303,7 @@ do not claim a process is safe or safe to terminate. The detector does not
 detect orphaned, stale, or abandoned processes and performs no process control.
 The daemon evaluates findings on process-sampling ticks and serves the cached
 result over IPC without recomputing it per request. `syswatch suggestions` prints
-the cached findings; Kitty rendering does not show them yet. A finding describes
+the cached findings. The Kitty tab bar shows only their count; see [Advisory badge](#advisory-badge). A finding describes
 observed evidence and never authorizes a process action.
 
 ### Advisory eligibility
