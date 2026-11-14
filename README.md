@@ -109,7 +109,7 @@ Run its suite from the repository root with the command in [Development](#develo
 `kitty/syswatch_cache.py` keeps the latest `status` and `suggestions` results in memory for Kitty drawing code. `TelemetryCache.view()` reads one immutable snapshot and never does I/O, so a tab-bar `draw_tab` can call it directly.
 
 - Refresh intervals: `status` every 1000 ms and `suggestions` every 5000 ms by default. A shorter interval raises `ValueError`. The daemon samples at 1 s and 5 s, so actual refresh periods are about one second for `status` and about five seconds for `suggestions`, plus scan time.
-- Staleness: a channel is `stale` three intervals after its data was produced (3000 ms for `status`, 15000 ms for `suggestions`). The check runs at read time, so a stopped worker cannot present old data as live.
+- Staleness: a channel is `stale` three intervals after its data was produced (3000 ms for `status`, 15000 ms for `suggestions`). The check runs at read time, so a stopped refresh cannot present old data as live.
 - Failures: a failed fetch clears `value`. The last good value stays in `last_value` with `last_age_ms`.
 - States: `not_refreshed` before the first fetch, then each `ClientResult.state`. `warming_up` is normal for `suggestions` for about the first two minutes after the daemon starts.
 - Driver: `install_refresh_timer(cache)` runs one chain of one-shot Kitty main-loop timers. It starts no threads. Each step starts at most one nonblocking socket request and advances it without waiting. A request has a 250 ms deadline. A failed request backs off from 1 s to 10 s. `get_shared()` returns the process-wide cache, and `stop_refresh_timer()` stops the chain.
@@ -161,7 +161,7 @@ This repository does not install a Kitty indicator.
 | `crates/syswatch-cli/src/main.rs` | Command dispatch and process entry point |
 | `crates/syswatch-cli/src/output.rs` | Status, process, and advisory report rendering |
 | `kitty/syswatch_client.py` | Read-only Python client for cached status and suggestions |
-| `kitty/syswatch_cache.py` | In-memory cache of status and suggestions, refresh worker, shared instance |
+| `kitty/syswatch_cache.py` | In-memory cache of status and suggestions, request scheduler, shared instance |
 | `kitty/syswatch_transport.py` | Nonblocking one-request socket state machine with a whole-request deadline |
 | `kitty/syswatch_refresh.py` | Main-loop timer chain that drives the cache; no threads |
 | `kitty/syswatch_redraw.py` | Tab-bar repaint timer on non-public Kitty symbols, with a fallback |
