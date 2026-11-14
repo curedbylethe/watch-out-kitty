@@ -127,6 +127,7 @@ Kitty does not render a hidden, minimized, or fully covered window. A change mad
 - Values: whole percent, rounded half-up and clamped to 0-100. RAM is occupied physical RAM as a share of total RAM.
 - `CPU --  RAM --`: before the first reply, and while the daemon warms up.
 - `CPU --`: while the first CPU sample is not ready.
+- `RAM --`: the daemon reported no total memory.
 - `~` before each value: the data is stale (older than 3 s).
 - `syswatch offline`: the daemon cannot be reached or replies with an error.
 
