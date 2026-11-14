@@ -42,19 +42,28 @@ class FakeTimer:
 class RedrawTest(unittest.TestCase):
     def setUp(self):
         syswatch_redraw._timer_id = None
-        syswatch_redraw._last_revision = None
-        self.view = types.SimpleNamespace(revision=0)
+        syswatch_redraw._last_key = None
+        self.view = types.SimpleNamespace(
+            revision=0,
+            status=types.SimpleNamespace(state="available"),
+            suggestions=types.SimpleNamespace(state="warming_up"),
+        )
         self.get_view = lambda: self.view
         self.timer = FakeTimer()
         self.managers = [FakeManager()]
+        self.wakeups = 0
 
     def install(self, **overrides):
         options = {
             "add_timer": self.timer,
             "get_tab_managers": lambda: self.managers,
+            "wakeup": self.wake,
         }
         options.update(overrides)
         return install_redraw_timer(self.get_view, **options)
+
+    def wake(self):
+        self.wakeups += 1
 
     def tick(self):
         self.timer.calls[0][0](7)
@@ -93,6 +102,7 @@ class RedrawTest(unittest.TestCase):
         self.install()
         self.tick()
         self.assertEqual([m.marked for m in self.managers], [0])
+        self.assertEqual(self.wakeups, 0)
 
     def test_changed_revision_marks_every_manager_once(self):
         self.managers.append(FakeManager())
@@ -101,6 +111,32 @@ class RedrawTest(unittest.TestCase):
         self.tick()
         self.tick()
         self.assertEqual([m.marked for m in self.managers], [1, 1])
+        self.assertEqual(self.wakeups, 1)
+
+    def test_stale_transition_without_new_revision_repaints_once(self):
+        self.install()
+        self.view.status.state = "stale"
+        self.tick()
+        self.tick()
+        self.assertEqual((self.managers[0].marked, self.wakeups), (1, 1))
+
+    def test_unchanged_presentation_never_wakes_the_loop(self):
+        self.install()
+        for _ in range(5):
+            self.tick()
+        self.assertEqual((self.managers[0].marked, self.wakeups), (0, 0))
+
+    def test_missing_wakeup_is_the_fallback(self):
+        # No `kitty` package in tests, so resolving the default wakeup fails.
+        self.assertFalse(
+            install_redraw_timer(
+                self.get_view,
+                add_timer=self.timer,
+                get_tab_managers=lambda: self.managers,
+                wakeup=None,
+            )
+        )
+        self.assertEqual(self.timer.calls, [])
 
     def test_failing_manager_does_not_stop_the_others(self):
         class Broken(FakeManager):
