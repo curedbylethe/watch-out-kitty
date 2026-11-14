@@ -24,6 +24,12 @@ fn run() -> Result<(), DaemonError> {
     };
     let latest = scheduler.latest_handle();
     let action_latest = std::sync::Arc::clone(&latest);
+    let update_latest = std::sync::Arc::clone(&latest);
+    // The per-tick dismissal refresh reads this path; the check thread requires it too.
+    latest
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .set_state_path(syswatch_core::update::state_path().ok());
     // Two process intervals: the scan behind an action may be one interval old.
     let max_observation_age_ms = config.process_interval().as_millis() as u64 * 2;
     let server = match syswatch_daemon::ipc::start(
@@ -54,6 +60,7 @@ fn run() -> Result<(), DaemonError> {
         }
     };
     eprintln!("syswatch-daemon: serving at {}", socket.display());
+    syswatch_daemon::update_check::start(update_latest);
     let result = scheduler.run().map_err(DaemonError::Scheduler);
     if let Err(error) = server.shutdown() {
         eprintln!("syswatch-daemon: socket cleanup: {error}");

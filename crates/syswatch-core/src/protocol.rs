@@ -81,6 +81,15 @@ pub struct ProtocolError {
     pub message: String,
 }
 
+/// A newer release discovered by the daemon's out-of-band update check.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UpdateNotice {
+    /// Version of the newer release, in `MAJOR.MINOR.PATCH` form.
+    pub latest_version: String,
+    /// Release page URL published in the release feed.
+    pub url: String,
+}
+
 /// A protocol response.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -95,6 +104,14 @@ pub enum Response {
         process_count: Option<usize>,
         /// Time when process observations were last collected.
         processes_updated_at_ms: Option<u64>,
+        /// Version of the daemon binary that produced this response. Absent in
+        /// a reply from an older daemon.
+        #[serde(default)]
+        build_version: Option<String>,
+        /// Newer release discovered by the daemon's update check. Absent when
+        /// the check is off, has not succeeded, or the version was dismissed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        update: Option<UpdateNotice>,
     },
     /// Latest process observations.
     Processes {
@@ -146,8 +163,18 @@ pub enum Response {
 }
 
 impl Response {
-    /// Build a status response from a system snapshot.
+    /// Build a status response for this build, with no update notice.
     pub fn status(snapshot: &SystemSnapshot) -> Self {
+        Self::status_with(snapshot, env!("CARGO_PKG_VERSION"), None)
+    }
+
+    /// Build a status response from a system snapshot, the running build
+    /// version, and an optional update notice.
+    pub fn status_with(
+        snapshot: &SystemSnapshot,
+        build_version: &str,
+        update: Option<&UpdateNotice>,
+    ) -> Self {
         Self::Status {
             version: PROTOCOL_VERSION,
             aggregate: AggregateSnapshot {
@@ -160,6 +187,8 @@ impl Response {
                 .processes_updated_at_ms
                 .map(|_| snapshot.processes.len()),
             processes_updated_at_ms: snapshot.processes_updated_at_ms,
+            build_version: Some(build_version.to_owned()),
+            update: update.cloned(),
         }
     }
 
@@ -316,7 +345,7 @@ fn malformed_request() -> ProtocolError {
 mod tests {
     use super::{
         ErrorCode, PROTOCOL_VERSION, ProtocolError, Request, RequestCommand, Response,
-        decode_request, encode_line,
+        UpdateNotice, decode_request, encode_line,
     };
     use crate::snapshot::{MemorySnapshot, ProcessSnapshot, SystemSnapshot};
 
@@ -601,20 +630,50 @@ mod tests {
                     Some(1_700_000_000_100),
                     vec![process("worker", 42), process("kitty", 43)],
                 ),
-                r#"{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":42.5,"cpu_updated_at_ms":1700000000123,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":2,"processes_updated_at_ms":1700000000100}"#,
+                r#"{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":42.5,"cpu_updated_at_ms":1700000000123,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":2,"processes_updated_at_ms":1700000000100,"build_version":"1.2.3"}"#,
             ),
             (
                 snapshot(None, None, vec![]),
-                r#"{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":0.0,"cpu_updated_at_ms":null,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":null,"processes_updated_at_ms":null}"#,
+                r#"{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":0.0,"cpu_updated_at_ms":null,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":null,"processes_updated_at_ms":null,"build_version":"1.2.3"}"#,
             ),
         ];
 
         for (snapshot, expected) in cases {
-            let response = Response::status(&snapshot);
+            let response = Response::status_with(&snapshot, "1.2.3", None);
             let line = encode_line(&response).unwrap();
             assert_eq!(line, expected);
             assert_eq!(serde_json::from_str::<Response>(&line).unwrap(), response);
         }
+    }
+
+    #[test]
+    fn status_reply_without_the_new_fields_decodes_with_defaults() {
+        let line = r#"{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":0.0,"cpu_updated_at_ms":null,"memory":{"total_bytes":1,"used_bytes":0}},"process_count":null,"processes_updated_at_ms":null}"#;
+        match serde_json::from_str::<Response>(line).unwrap() {
+            Response::Status {
+                build_version,
+                update,
+                ..
+            } => {
+                assert_eq!(build_version, None);
+                assert_eq!(update, None);
+            }
+            other => panic!("expected a status reply, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn status_with_an_update_round_trips() {
+        let notice = UpdateNotice {
+            latest_version: "1.2.3".into(),
+            url: "https://example.invalid/releases/v1.2.3".into(),
+        };
+        let response = Response::status_with(&snapshot(None, None, vec![]), "1.2.2", Some(&notice));
+        let line = encode_line(&response).unwrap();
+        assert!(line.contains(
+            r#""update":{"latest_version":"1.2.3","url":"https://example.invalid/releases/v1.2.3"}"#
+        ));
+        assert_eq!(serde_json::from_str::<Response>(&line).unwrap(), response);
     }
 
     #[test]

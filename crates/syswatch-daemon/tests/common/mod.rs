@@ -148,6 +148,8 @@ pub fn poll(
 pub fn spawn_daemon(socket: &Path) -> io::Result<Child> {
     Command::new(env!("CARGO_BIN_EXE_syswatch-daemon"))
         .env("SYSWATCH_SOCKET", socket)
+        // The gate stays offline: no daemon under test performs a release check.
+        .env("SYSWATCH_DISABLE_UPDATE_CHECK", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

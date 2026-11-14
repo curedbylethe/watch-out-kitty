@@ -38,6 +38,7 @@ pub use preflight::{
     PreflightAssessment, PreflightConclusion, PreflightObservation, PreflightReason,
     PreflightRequest, RequestedAction,
 };
+pub use protocol::UpdateNotice;
 pub use snapshot::{AggregateSnapshot, MemorySnapshot, ProcessSnapshot, SystemSnapshot};
 pub use update::{
     CommandRunner, CurlRunner, Release, StatePathError, UPDATE_FEED_URL, Version, check, disabled,

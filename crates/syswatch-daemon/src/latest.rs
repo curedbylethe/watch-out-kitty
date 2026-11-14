@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 
 use syswatch_core::provenance::ProcessProvenance;
+use syswatch_core::update::{self, Version};
 use syswatch_core::{
     AdvisoryFinding, AggregateSnapshot, AlertEvent, AlertPolicy, FindingId, ProcessSnapshot,
-    SuggestionsSnapshot, SystemSnapshot,
+    SuggestionsSnapshot, SystemSnapshot, UpdateNotice,
 };
 
 use crate::{dismissal::DismissedFindings, sampler::ProcessScan};
@@ -12,6 +14,7 @@ use crate::{dismissal::DismissedFindings, sampler::ProcessScan};
 pub struct Cached {
     pub snapshot: Option<SystemSnapshot>,
     pub suggestions: Option<SuggestionsSnapshot>,
+    pub update: Option<UpdateNotice>,
 }
 
 /// Borrowed process evidence from one scan; see [`LatestSnapshot::action_state`].
@@ -30,6 +33,9 @@ pub struct LatestSnapshot {
     dismissed: DismissedFindings,
     alerts: AlertPolicy,
     alert_events: Vec<AlertEvent>,
+    update: Option<UpdateNotice>,
+    dismissed_version: Option<Version>,
+    state_path: Option<PathBuf>,
 }
 
 impl LatestSnapshot {
@@ -37,6 +43,7 @@ impl LatestSnapshot {
         self.aggregate = Some(aggregate);
     }
     pub fn set_processes(&mut self, processes: ProcessScan) {
+        self.refresh_dismissal();
         self.dismissed
             .retain_observed(processes.processes.iter().map(|process| process.identity()));
         if let Some(suggestions) = &processes.suggestions {
@@ -53,6 +60,23 @@ impl LatestSnapshot {
 
     pub fn dismiss(&mut self, id: FindingId) {
         self.dismissed.dismiss(id);
+    }
+
+    /// Path of the durable dismissal state file. `None` disables dismissal.
+    pub fn set_state_path(&mut self, path: Option<PathBuf>) {
+        self.state_path = path;
+    }
+
+    /// Publishes the latest update check result. The notice is filtered on the
+    /// way out, so a dismissal that arrives later hides it.
+    pub fn set_update(&mut self, update: Option<UpdateNotice>) {
+        self.update = update;
+    }
+
+    /// Re-reads the dismissal state once per process tick. Never called on the
+    /// request path.
+    fn refresh_dismissal(&mut self) {
+        self.dismissed_version = self.state_path.as_deref().and_then(update::load_state);
     }
 
     /// Alert events from the latest process tick that carried suggestions.
@@ -89,7 +113,8 @@ impl LatestSnapshot {
     }
 
     /// Serves the cached suggestions without dismissed findings. The raw scan
-    /// keeps every finding.
+    /// keeps every finding. A notice is served unless the durable dismissal is
+    /// at least as new as it.
     pub fn cached(&self) -> Cached {
         Cached {
             snapshot: self.snapshot(),
@@ -104,8 +129,20 @@ impl LatestSnapshot {
                         .retain(|finding| !self.dismissed.is_dismissed(&finding.id));
                     visible
                 }),
+            update: self
+                .update
+                .clone()
+                .filter(|notice| !is_dismissed(self.dismissed_version, notice)),
         }
     }
+}
+
+/// A notice is suppressed when the dismissed version is not older than it.
+fn is_dismissed(dismissed: Option<Version>, notice: &UpdateNotice) -> bool {
+    let Some(noticed) = update::parse_tag(&notice.latest_version) else {
+        return false;
+    };
+    dismissed.is_some_and(|version| version >= noticed)
 }
 
 #[cfg(test)]
@@ -115,7 +152,7 @@ mod tests {
     use syswatch_core::{
         AdvisoryFinding, AggregateSnapshot, AlertReason, Confidence, DEFAULT_ALERT_COOLDOWN_MS,
         FindingEvidence, FindingId, FindingKind, MemorySnapshot, ProcessSnapshot,
-        SuggestionsSnapshot,
+        SuggestionsSnapshot, UpdateNotice,
     };
 
     const T: u64 = 1_700_000_000_000;
@@ -303,6 +340,48 @@ mod tests {
         });
         latest.dismiss(finding(42, 1).id);
         assert!(latest.cached().suggestions.is_none());
+    }
+
+    fn notice(latest_version: &str) -> UpdateNotice {
+        UpdateNotice {
+            latest_version: latest_version.into(),
+            url: "https://example.invalid/releases".into(),
+        }
+    }
+
+    /// Writes a dismissal state file and returns its directory and path.
+    fn state_file(name: &str, dismissed: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("latest-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("update.json");
+        syswatch_core::update::save_state(
+            &path,
+            &syswatch_core::update::parse_tag(dismissed).unwrap(),
+        )
+        .unwrap();
+        (dir, path)
+    }
+
+    #[test]
+    fn cached_omits_a_notice_the_state_file_already_dismissed() {
+        let (dir, path) = state_file("dismissed", "1.2.3");
+        let mut latest = LatestSnapshot::default();
+        latest.set_state_path(Some(path));
+        latest.set_update(Some(notice("1.2.3")));
+        latest.set_processes(scan(vec![], vec![]));
+        assert_eq!(latest.cached().update, None);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn cached_keeps_a_notice_newer_than_the_dismissed_version() {
+        let (dir, path) = state_file("newer", "1.2.2");
+        let mut latest = LatestSnapshot::default();
+        latest.set_state_path(Some(path));
+        latest.set_update(Some(notice("1.2.3")));
+        latest.set_processes(scan(vec![], vec![]));
+        assert_eq!(latest.cached().update, Some(notice("1.2.3")));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
