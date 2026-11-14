@@ -21,8 +21,8 @@ OFFLINE_STATES = frozenset(
     }
 )
 PLACEHOLDER = "CPU --  RAM --"
-# Worst case: both stale prefixes and the widest stale badge (the daemon caps the count at 64).
-MAX_INDICATOR_TEXT = "CPU ~100%  RAM ~100%  !~64"
+# Worst case: both stale prefixes, the widest stale badge (the daemon caps the count at 64), and the marker.
+MAX_INDICATOR_TEXT = "CPU ~100%  RAM ~100%  !~64 ^"
 
 
 def _percent(value, prefix):
@@ -44,16 +44,26 @@ def _badge(view) -> str:
     return f"!{count}" if count else ""
 
 
-def _with_badge(text, view) -> str:
+def _marker(view) -> str:
+    """Return `^` while the daemon reports an update notice, else ""."""
+    try:
+        return "^" if view.status.value.update is not None else ""
+    except AttributeError:  # an unexpected payload shape must not raise on Kitty's drawing path
+        return ""
+
+
+def _decorate(text, view) -> str:
     badge = _badge(view)
-    return f"{text}  {badge}" if badge else text
+    text = f"{text}  {badge}" if badge else text
+    marker = _marker(view)
+    return f"{text} {marker}" if marker else text
 
 
 def render(view) -> str | None:
     """Return the indicator text for `view`, or None when the status state is not recognised."""
     status = view.status
     if status.state in ("not_refreshed", "warming_up"):
-        return _with_badge(PLACEHOLDER, view)
+        return _decorate(PLACEHOLDER, view)
     if status.state in OFFLINE_STATES:
         return "syswatch offline"
     if status.state not in ("available", "stale") or status.value is None:
@@ -63,7 +73,7 @@ def render(view) -> str | None:
     cpu = "--" if value.cpu_updated_at_ms is None else _percent(value.cpu_usage_percent, prefix)
     memory = value.memory
     ram = "--" if memory.total_bytes <= 0 else _percent(memory.used_bytes / memory.total_bytes * 100, prefix)
-    return _with_badge(f"CPU {cpu}  RAM {ram}", view)
+    return _decorate(f"CPU {cpu}  RAM {ram}", view)
 
 
 def fit(text: str, available_width: int) -> str | None:

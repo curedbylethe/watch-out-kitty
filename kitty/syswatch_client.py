@@ -122,6 +122,12 @@ class Memory:
 
 
 @dataclass(frozen=True)
+class Update:
+    latest_version: str
+    url: str
+
+
+@dataclass(frozen=True)
 class Status:
     timestamp_ms: int
     cpu_usage_percent: float
@@ -129,6 +135,7 @@ class Status:
     memory: Memory
     process_count: int | None
     processes_updated_at_ms: int | None
+    update: Update | None = None
 
 
 @dataclass(frozen=True)
@@ -225,6 +232,16 @@ def _memory(value):
     return Memory(_uint(value["total_bytes"]), _uint(value["used_bytes"]))
 
 
+def _update(value):
+    """Return the optional update notice, or None when the field is absent, null, or malformed."""
+    if not isinstance(value, dict):
+        return None
+    latest_version, url = value.get("latest_version"), value.get("url")
+    if not isinstance(latest_version, str) or not isinstance(url, str):
+        return None
+    return Update(latest_version, url)
+
+
 def _status(obj):
     agg = _obj(obj["aggregate"])
     status = Status(
@@ -234,6 +251,7 @@ def _status(obj):
         memory=_memory(agg["memory"]),
         process_count=_opt(obj["process_count"], _uint),
         processes_updated_at_ms=_opt(obj["processes_updated_at_ms"], _uint),
+        update=_update(obj.get("update")),
     )
     return status, status.timestamp_ms
 

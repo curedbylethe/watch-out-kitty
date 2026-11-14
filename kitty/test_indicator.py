@@ -5,12 +5,13 @@ import types
 import unittest
 
 from syswatch_cache import CacheView, ChannelView, TelemetryCache
-from syswatch_client import ClientResult, Evidence, Finding, Memory, Status, Suggestions, read_suggestions
+from syswatch_client import ClientResult, Evidence, Finding, Memory, Status, Suggestions, Update, read_suggestions
 from syswatch_indicator import MAX_INDICATOR_TEXT, fit, render
 from test_responses import finding as wire_finding
 from test_responses import run, suggestions_body
 
 WALL_MS = 1_700_000_000_000
+NOTICE = Update("1.2.3", "https://example.invalid/kitty")
 STATUS = Status(
     timestamp_ms=WALL_MS,
     cpu_usage_percent=18.0,
@@ -56,9 +57,13 @@ def stale(count):
     return channel("stale", _suggestions(count))
 
 
-def status(cpu=18.0, cpu_at=WALL_MS, used=42, total=100):
+def status(cpu=18.0, cpu_at=WALL_MS, used=42, total=100, update=None):
     return dataclasses.replace(
-        STATUS, cpu_usage_percent=cpu, cpu_updated_at_ms=cpu_at, memory=Memory(total_bytes=total, used_bytes=used)
+        STATUS,
+        cpu_usage_percent=cpu,
+        cpu_updated_at_ms=cpu_at,
+        memory=Memory(total_bytes=total, used_bytes=used),
+        update=update,
     )
 
 
@@ -147,9 +152,37 @@ class RenderTest(unittest.TestCase):
         self.assertIsNone(render(view("bogus", status(), fresh(2))))
 
     def test_worst_case_is_the_reserved_text(self):
-        text = render(view("stale", status(cpu=100.0, used=100, total=100), stale(64)))
+        text = render(view("stale", status(cpu=100.0, used=100, total=100, update=NOTICE), stale(64)))
         self.assertEqual(text, MAX_INDICATOR_TEXT)
-        self.assertLessEqual(len(text), len(MAX_INDICATOR_TEXT))
+        self.assertEqual(len(MAX_INDICATOR_TEXT), 28)
+        self.assertEqual(fit(MAX_INDICATOR_TEXT, len(MAX_INDICATOR_TEXT)), MAX_INDICATOR_TEXT)
+
+    def test_marker_absent_without_a_notice(self):
+        self.assertEqual(render(view("available", status())), "CPU 18%  RAM 42%")
+
+    def test_marker_follows_the_badge(self):
+        cases = [
+            (fresh(0), "CPU 18%  RAM 42% ^"),
+            (fresh(2), "CPU 18%  RAM 42%  !2 ^"),
+            (stale(0), "CPU 18%  RAM 42%  !~0 ^"),
+            (channel("warming_up"), "CPU 18%  RAM 42%  !? ^"),
+        ]
+        for advisory, expected in cases:
+            with self.subTest(expected=expected):
+                text = render(view("available", status(update=NOTICE), advisory))
+                self.assertEqual(text, expected)
+                self.assertTrue(text.isascii())
+
+    def test_marker_on_a_stale_status(self):
+        self.assertEqual(render(view("stale", status(update=NOTICE))), "CPU ~18%  RAM ~42% ^")
+
+    def test_marker_needs_a_status_value(self):
+        self.assertEqual(render(view("not_refreshed")), "CPU --  RAM --")
+        self.assertEqual(render(view("timeout")), "syswatch offline")
+
+    def test_marker_tolerates_a_value_without_the_field(self):
+        value = types.SimpleNamespace(cpu_updated_at_ms=WALL_MS, cpu_usage_percent=18.0, memory=Memory(100, 42))
+        self.assertEqual(render(view("available", value)), "CPU 18%  RAM 42%")
 
     def test_hostile_finding_text_never_reaches_the_badge(self):
         hostile = Finding(42, 7, "\x1b[31mcpu", "high", WALL_MS, "a\x00b\nc\x1b[0m�", Evidence(6, 120_000, None, None))
