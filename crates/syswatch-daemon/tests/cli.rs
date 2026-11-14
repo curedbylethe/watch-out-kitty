@@ -3,10 +3,14 @@
 mod common;
 
 use common::{
-    CLIENT_TIMEOUT, Daemon, TempDir, field_u64, request, request_line, run_cli, socket_path,
-    wait_until,
+    CLIENT_TIMEOUT, Daemon, TempDir, cli_binary, field_u64, request, request_line, run_cli,
+    socket_path, wait_for_exit, wait_until,
 };
-use std::time::Duration;
+use std::{
+    path::Path,
+    process::{Command, Output, Stdio},
+    time::Duration,
+};
 use syswatch_core::protocol::RequestCommand;
 
 #[test]
@@ -234,4 +238,86 @@ fn close_help_exits_zero() {
             String::from_utf8_lossy(&output.stdout)
         );
     }
+}
+
+/// Runs the CLI with the update state path pointed at a temporary file.
+fn run_cli_with_state(socket: &Path, state: &Path, args: &[&str]) -> Output {
+    let child = Command::new(cli_binary())
+        .args(args)
+        .env("SYSWATCH_SOCKET", socket)
+        .env("SYSWATCH_UPDATE_STATE", state)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn syswatch CLI");
+    wait_for_exit(child, Duration::from_secs(5))
+}
+
+const UPDATE_USAGE_FIRST_LINE: &str = "Usage: syswatch update <COMMAND>";
+
+#[test]
+fn update_without_a_sub_command_prints_its_usage() {
+    let dir = TempDir::new();
+
+    let output = run_cli(&socket_path(&dir), &["update"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(stderr.contains(UPDATE_USAGE_FIRST_LINE), "{stderr}");
+    assert!(stderr.contains("update requires a sub-command"), "{stderr}");
+    assert!(!stderr.contains("cannot connect"), "{stderr}");
+}
+
+#[test]
+fn update_help_exits_zero() {
+    let dir = TempDir::new();
+
+    for spelling in ["--help", "-h"] {
+        let output = run_cli(&socket_path(&dir), &["update", spelling]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{spelling}");
+        assert!(stdout.contains(UPDATE_USAGE_FIRST_LINE), "{stdout}");
+        assert!(stdout.contains("dismiss"), "{stdout}");
+        assert!(output.stderr.is_empty(), "{spelling}");
+    }
+}
+
+#[test]
+fn update_rejects_unknown_and_extra_sub_commands() {
+    let dir = TempDir::new();
+
+    for args in [
+        &["update", "check"][..],
+        &["update", "dismiss", "extra"],
+        &["update", "--help", "dismiss"],
+    ] {
+        let output = run_cli(&socket_path(&dir), args);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert_eq!(output.status.code(), Some(2), "{args:?}");
+        assert!(
+            stderr.contains(UPDATE_USAGE_FIRST_LINE),
+            "{args:?}: {stderr}"
+        );
+        assert!(!stderr.contains("cannot connect"), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
+fn update_dismiss_without_a_notice_writes_nothing() {
+    let dir = TempDir::new();
+    let daemon = Daemon::start(&dir);
+    let state = dir.path().join("state/update.json");
+
+    let output = run_cli_with_state(daemon.socket(), &state, &["update", "dismiss"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(output.status.success(), "stderr: {:?}", output.stderr);
+    assert_eq!(stdout.trim_end(), "no update to dismiss");
+    assert!(output.stderr.is_empty());
+    assert!(!state.exists(), "{} must not be written", state.display());
+    assert!(
+        !state.parent().expect("state path has a parent").exists(),
+        "the state directory must not be created"
+    );
+    assert!(daemon.socket().exists());
 }
