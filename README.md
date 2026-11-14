@@ -109,7 +109,7 @@ The suite cannot reach a real Kitty window. Run these checks in order, in a macO
 11. With a current finding, the marker shows `!N`. After the finding clears, the marker disappears. With the daemon down, no marker appears beside `syswatch offline`. A finding needs a process that holds at least 256 MiB, uses at most 1% CPU, and is not started from a terminal, so `yes > /dev/null` never produces one. Start a process from launchd that holds memory and sleeps, and wait about 2–3 minutes:
 
     ```sh
-    cat > /tmp/syswatch-hold.py <<'EOF'
+    cat > "${TMPDIR:-/tmp}/syswatch-hold.py" <<'EOF'
     import ctypes, mmap, time
     size = 300 * 1024 * 1024
     m = mmap.mmap(-1, size)
@@ -119,7 +119,7 @@ The suite cannot reach a real Kitty window. Run these checks in order, in a macO
         m[i] = 1
     time.sleep(3600)
     EOF
-    launchctl submit -l syswatch.test -- python3 /tmp/syswatch-hold.py
+    launchctl submit -l syswatch.test -- python3 "${TMPDIR:-/tmp}/syswatch-hold.py"
     cargo run -q -p syswatch-cli -- suggestions   # expect a memory finding for Python
     ```
 
