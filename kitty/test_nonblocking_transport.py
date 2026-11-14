@@ -134,6 +134,7 @@ class NonblockingRequestTest(unittest.TestCase):
         req = request(self.daemon.path)
         drive(req, self.daemon, steps=5)
         self.daemon.accept()
+        self.daemon.received_line()  # unread data makes Linux reset the peer instead of sending EOF
         self.daemon.conn.close()
         self.daemon.conn = None
         self.assertEqual(drive(req, self.daemon, start=10).state, "malformed_response")
