@@ -1,11 +1,14 @@
 import ast
 import pathlib
 import types
+import io
 import unittest
+from contextlib import redirect_stderr
 from unittest import mock
 
 import probe_tab_bar
 import syswatch_redraw
+import syswatch_refresh
 from syswatch_cache import TelemetryCache
 from syswatch_client import ClientResult, Memory, Status
 from syswatch_redraw import install_redraw_timer
@@ -43,6 +46,10 @@ class RedrawTest(unittest.TestCase):
     def setUp(self):
         syswatch_redraw._timer_id = None
         syswatch_redraw._last_key = None
+        syswatch_refresh._reported.clear()
+        quiet = mock.patch("sys.stderr", io.StringIO())  # expected errors stay out of test output
+        quiet.start()
+        self.addCleanup(quiet.stop)
         self.view = types.SimpleNamespace(
             revision=0,
             status=types.SimpleNamespace(state="available"),
@@ -147,8 +154,11 @@ class RedrawTest(unittest.TestCase):
         self.managers.append(FakeManager())
         self.install()
         self.view.revision = 1
-        self.tick()
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.tick()
         self.assertEqual(self.managers[1].marked, 1)
+        self.assertEqual(err.getvalue(), "syswatch: redraw window: RuntimeError: closed window\n")
 
     def test_manager_without_method_is_skipped(self):
         self.managers.append(object())
