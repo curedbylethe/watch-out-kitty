@@ -170,9 +170,38 @@ Neither key touches a process. Neither mapping sends a signal or runs `syswatch 
 
 `launch` does not run a login shell, so `syswatch` must be on the PATH that Kitty inherits. If it is not, replace `syswatch` in both lines with the binary's absolute path, for example `/path/to/syswatch`.
 
-To install, symlink `kitty/tab_bar.py` as `tab_bar.py` in the directory of the `kitty.conf` that Kitty loads. By default that is `~/.config/kitty`, or the directory named by `KITTY_CONFIG_DIRECTORY`. Use a symlink, not a copy: the file finds the adapter modules next to its real path. Kitty loads `tab_bar.py` once, so restart Kitty after you install it.
+#### Install
 
-Set these options in `kitty.conf`:
+What you need:
+
+- macOS, the primary platform. Tested with Kitty 0.49.2. The indicator does not check your version: it probes four non-public Kitty symbols at startup and falls back to Kitty-driven repaints when any is missing.
+- Python 3.11 or newer, standard library only. Nothing to install. CI runs the suite on Python 3.15.
+- Rust stable toolchain. The workspace uses edition 2024; no numeric rustc version is set.
+- The daemon, started from the repository root with `cargo run -p syswatch-daemon`. It runs in the foreground. No service unit or background installer is provided.
+- The socket: the adapter resolves the path from `SYSWATCH_SOCKET`, `XDG_RUNTIME_DIR` and `HOME`, in the order given in [Daemon socket](#daemon-socket). It creates neither the directory nor the socket; the daemon does.
+
+Steps:
+
+1. Clone the repository and build the workspace:
+
+   ```sh
+   git clone https://github.com/curedbylethe/watch-out-kitty.git
+   cd watch-out-kitty
+   cargo build --workspace
+   ```
+
+2. Link the adapter as `tab_bar.py` in your Kitty config directory. The directory is `$KITTY_CONFIG_DIRECTORY` when set, otherwise `~/.config/kitty`. Kitty reads that variable; the adapter does not.
+
+   ```sh
+   ln -s "$PWD/kitty/tab_bar.py" "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}/tab_bar.py"
+   ```
+
+   Use a symlink, not a copy: the file finds the adapter modules next to its real path. If `ln` reports `File exists`, read [Existing tab_bar.py](#existing-tab_barpy) before you do anything else.
+
+3. Set the three options shown below in `kitty.conf`.
+4. Start the daemon, then restart Kitty. Kitty loads `tab_bar.py` once, so a restart is needed after each change.
+
+Options for `kitty.conf`:
 
 ```conf
 tab_bar_style custom
@@ -192,7 +221,13 @@ Limits:
 - The indicator is not clickable.
 - It uses the theme's inactive tab foreground on the inactive tab background, with no icon font.
 
-Kitty loads one `tab_bar.py` per config directory. If you already have one, do not replace it. Import this file's `draw_tab` from yours and call it, or keep yours and call this one for the last tab. Nothing is merged automatically. Further installation steps, troubleshooting, and removal are planned in [issue #70](https://github.com/curedbylethe/watch-out-kitty/issues/70).
+#### Existing tab_bar.py
+
+Kitty loads one `tab_bar.py` per config directory, and nothing is merged automatically. If you already have one, do not delete or replace it. Choose one of these cases:
+
+- **No `tab_bar.py` yet.** Use the link from step 2. Keep your customization in `tab_title_template`; the adapter keeps it.
+- **Your `tab_bar.py` must stay as it is.** Do not install this adapter.
+- **Your `tab_bar.py` must keep drawing the tabs.** Link the adapter under a second name in the same directory, for example `syswatch_tab_bar.py`. The adapter finds its modules from its real path, so the link name is free. In your `tab_bar.py`, run `from syswatch_tab_bar import draw_tab` and call it for the last tab. The last tab then uses Kitty's fade drawing. This variant is not yet verified on a real session; check it with the manual checklist before you rely on it.
 
 ## Project files
 
