@@ -1,11 +1,14 @@
 import ast
 import dataclasses
 import pathlib
+import types
 import unittest
 
-from syswatch_cache import CacheView, ChannelView
-from syswatch_client import Memory, Status
-from syswatch_indicator import fit, render
+from syswatch_cache import CacheView, ChannelView, TelemetryCache
+from syswatch_client import ClientResult, Evidence, Finding, Memory, Status, Suggestions, read_suggestions
+from syswatch_indicator import MAX_INDICATOR_TEXT, fit, render
+from test_responses import finding as wire_finding
+from test_responses import run, suggestions_body
 
 WALL_MS = 1_700_000_000_000
 STATUS = Status(
@@ -27,10 +30,30 @@ OFFLINE = (
 )
 
 
-def view(state, value=None):
-    channel = ChannelView(state, value, None, None, None, None, None, None)
-    empty = ChannelView("not_refreshed", None, None, None, None, None, None, None)
-    return CacheView(status=channel, suggestions=empty, revision=0)
+def channel(state, value=None):
+    return ChannelView(state, value, None, None, None, None, None, None)
+
+
+def view(state, value=None, advisory=None):
+    if advisory is None:
+        advisory = channel("available", Suggestions(WALL_MS, WALL_MS, ()))
+    return CacheView(status=channel(state, value), suggestions=advisory, revision=0)
+
+
+def _finding(kind="memory", explanation="pid 42 held memory"):
+    return Finding(42, 7, kind, "high", WALL_MS, explanation, Evidence(6, 120_000, None, None))
+
+
+def _suggestions(count):
+    return Suggestions(WALL_MS, WALL_MS, tuple(_finding() for _ in range(count)))
+
+
+def fresh(count):
+    return channel("available", _suggestions(count))
+
+
+def stale(count):
+    return channel("stale", _suggestions(count))
 
 
 def status(cpu=18.0, cpu_at=WALL_MS, used=42, total=100):
@@ -91,6 +114,70 @@ class RenderTest(unittest.TestCase):
     def test_output_is_ascii(self):
         self.assertTrue(render(view("stale", status())).isascii())
 
+    def test_badge_table(self):
+        cases = [
+            (fresh(1), "CPU 18%  RAM 42%  !1"),
+            (fresh(2), "CPU 18%  RAM 42%  !2"),
+            (fresh(64), "CPU 18%  RAM 42%  !64"),
+            (fresh(0), "CPU 18%  RAM 42%"),
+            (stale(0), "CPU 18%  RAM 42%  !~0"),
+            (stale(2), "CPU 18%  RAM 42%  !~2"),
+            (channel("not_refreshed"), "CPU 18%  RAM 42%  !?"),
+            (channel("warming_up"), "CPU 18%  RAM 42%  !?"),
+            (channel("timeout"), "CPU 18%  RAM 42%  !?"),
+            (channel("daemon_error"), "CPU 18%  RAM 42%  !?"),
+            (channel("bogus"), "CPU 18%  RAM 42%  !?"),
+            (channel("available"), "CPU 18%  RAM 42%  !?"),
+            (channel("available", object()), "CPU 18%  RAM 42%  !?"),
+            (channel("available", types.SimpleNamespace(findings=None)), "CPU 18%  RAM 42%  !?"),
+        ]
+        for advisory, expected in cases:
+            with self.subTest(advisory=advisory.state, expected=expected):
+                self.assertEqual(render(view("available", status(), advisory)), expected)
+
+    def test_badge_composes_with_placeholder_and_stale_status(self):
+        self.assertEqual(render(view("not_refreshed", None, fresh(2))), "CPU --  RAM --  !2")
+        self.assertEqual(render(view("not_refreshed", None, channel("warming_up"))), "CPU --  RAM --  !?")
+        self.assertEqual(render(view("stale", status(), fresh(2))), "CPU ~18%  RAM ~42%  !2")
+
+    def test_offline_status_has_no_badge(self):
+        for state in OFFLINE:
+            with self.subTest(state=state):
+                self.assertEqual(render(view(state, None, fresh(2))), "syswatch offline")
+        self.assertIsNone(render(view("bogus", status(), fresh(2))))
+
+    def test_worst_case_is_the_reserved_text(self):
+        text = render(view("stale", status(cpu=100.0, used=100, total=100), stale(64)))
+        self.assertEqual(text, MAX_INDICATOR_TEXT)
+        self.assertLessEqual(len(text), len(MAX_INDICATOR_TEXT))
+
+    def test_hostile_finding_text_never_reaches_the_badge(self):
+        hostile = Finding(42, 7, "\x1b[31mcpu", "high", WALL_MS, "a\x00b\nc\x1b[0m�", Evidence(6, 120_000, None, None))
+        advisory = channel("available", Suggestions(WALL_MS, WALL_MS, (hostile,)))
+        text = render(view("available", status(), advisory))
+        self.assertEqual(text, "CPU 18%  RAM 42%  !1")
+        self.assertTrue(text.isprintable())
+
+
+class WireBadgeTest(unittest.TestCase):
+    def cache_with(self, reply, **kwargs):
+        cache = TelemetryCache(monotonic_ms=lambda: 0)
+        cache._ingest("status", ClientResult("available", value=status(), age_ms=0), 0)
+        cache._ingest("suggestions", run(reply, read=read_suggestions, **kwargs), 0)
+        return cache
+
+    def test_decoded_reply_sets_the_count(self):
+        second = wire_finding(id={"pid": 43, "start_time_secs": 8, "kind": "memory"})
+        cache = self.cache_with(suggestions_body(findings=[wire_finding(), second]))
+        self.assertEqual(render(cache.view()), "CPU 18%  RAM 42%  !2")
+
+    def test_decoded_empty_reply_has_no_badge(self):
+        self.assertEqual(render(self.cache_with(suggestions_body()).view()), "CPU 18%  RAM 42%")
+
+    def test_decoded_stale_reply_keeps_its_count(self):
+        cache = self.cache_with(suggestions_body(findings=[wire_finding()]), max_age_ms=500)
+        self.assertEqual(render(cache.view()), "CPU 18%  RAM 42%  !~1")
+
 
 class FitTest(unittest.TestCase):
     def test_all_or_nothing(self):
@@ -101,6 +188,11 @@ class FitTest(unittest.TestCase):
         self.assertIsNone(fit(text, 0))
         self.assertIsNone(fit(text, -4))
         self.assertIsNone(fit("", 0))
+
+    def test_badge_text_uses_the_same_rule(self):
+        text = "CPU 18%  RAM 42%  !2"
+        self.assertEqual(fit(text, len(text)), text)
+        self.assertIsNone(fit(text, len(text) - 1))
 
 
 class PurityTest(unittest.TestCase):
@@ -113,11 +205,13 @@ class PurityTest(unittest.TestCase):
                 names |= {alias.name.split(".")[0] for alias in node.names}
             elif isinstance(node, ast.ImportFrom) and node.module:
                 names.add(node.module.split(".")[0])
-        self.assertFalse(names & {"kitty", "socket", "subprocess", "time", "threading", "os"})
+        self.assertEqual(names, {"math"})
         calls = {
-            node.func.id for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute))
         }
-        self.assertNotIn("open", calls)
+        self.assertFalse(calls & {"open", "notify", "advance", "request_line", "close", "signal", "kill", "sleep"})
 
 
 if __name__ == "__main__":

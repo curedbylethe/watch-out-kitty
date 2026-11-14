@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 
 from syswatch_cache import TelemetryCache
-from syswatch_client import ClientResult, Memory, Status
+from syswatch_client import ClientResult, Memory, Status, Suggestions
 
 
 def _as_rgb(color):
@@ -64,6 +64,7 @@ class TabBarTest(unittest.TestCase):
         _fade.calls.clear()
         self.cache = TelemetryCache(monotonic_ms=lambda: 0)
         self.cache._ingest("status", ClientResult("available", value=STATUS, age_ms=0), 0)
+        self.cache._ingest("suggestions", ClientResult("available", value=Suggestions(0, 0, ()), age_ms=0), 0)
         self.refresh = self.patch("install_refresh_timer", mock.Mock(return_value=True))
         self.redraw = self.patch("install_redraw_timer", mock.Mock(return_value=True))
         self.patch("get_shared", lambda **kwargs: self.cache)
@@ -154,7 +155,7 @@ class TabBarTest(unittest.TestCase):
         self.cache = TelemetryCache(monotonic_ms=lambda: 0)
         self.refresh.return_value = self.redraw.return_value = False
         screen, ends = self.draw_bar()
-        self.assertEqual([entry[0] for entry in self.indicator(screen)], ["CPU --  RAM --"])
+        self.assertEqual([entry[0] for entry in self.indicator(screen)], ["CPU --  RAM --  !?"])
         self.assertEqual(ends, [3, 7])
 
     def test_render_error_keeps_tabs_and_extent(self):
