@@ -74,7 +74,7 @@ class TabBarTest(unittest.TestCase):
     def draw_bar(self, columns=40, edge="top", for_layout=False):
         """Draw tabs "one" and "two"; return the screen and each tab's extent."""
         screen = FakeScreen(columns)
-        draw_data = types.SimpleNamespace(tab_bar_edge=edge, inactive_fg=FG, default_bg=BG)
+        draw_data = types.SimpleNamespace(tab_bar_edge=edge, inactive_fg=FG, default_bg=0x778899, inactive_bg=BG)
         extra = types.SimpleNamespace(for_layout=for_layout)
         ends = []
         for index, title in enumerate(("one", "two"), start=1):

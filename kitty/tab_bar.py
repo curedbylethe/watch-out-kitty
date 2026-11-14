@@ -50,7 +50,7 @@ def draw_tab(draw_data, screen, tab, before, max_tab_length, index, is_last, ext
         if text is not None:
             screen.cursor.bold = screen.cursor.italic = False
             screen.cursor.fg = as_rgb(int(draw_data.inactive_fg))
-            screen.cursor.bg = as_rgb(int(draw_data.default_bg))
+            screen.cursor.bg = as_rgb(int(draw_data.inactive_bg))
             screen.cursor.x = screen.columns - len(text)
             # The cursor stays after the text: Kitty erases the rest of the line from the cursor.
             screen.draw(text)
