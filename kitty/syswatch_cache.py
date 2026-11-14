@@ -2,33 +2,40 @@
 
 Drawing code reads `TelemetryCache.view()`, which only reads one immutable
 snapshot and does no I/O. `_ingest` replaces the whole snapshot with a single
-attribute assignment. CPython makes that swap atomic, so readers never see a
-half-written snapshot. Only one writer (the refresh worker) exists.
+attribute assignment. Only the caller that drives `advance()` writes, so
+no lock is needed.
+
+`advance(mono_ms)` is driven from Kitty's main-loop timer (see
+`syswatch_refresh`). It starts at most one nonblocking request, advances it by
+one step, and returns the delay until the next useful call. The cache creates
+no threads and never blocks.
 
 Polling limits: `status` at most every 1000 ms, `suggestions` at most every
 5000 ms. A shorter interval raises `ValueError`. A channel is `stale` when its
-data is older than three intervals (3000 ms, 15000 ms).
-
-`start()` runs one daemon thread, `syswatch-refresh`, per cache. It makes at most
-two requests per second, holds no queue and no history, and keeps only the last
-result per channel. `get_shared()` gives one cache per process.
+data is older than three intervals (3000 ms, 15000 ms). A failed request backs
+off from 1000 ms up to 10000 ms, and the next request starts only after the
+previous one completes, so a slow daemon cannot cause a catch-up burst.
 """
 
-import atexit
-import threading
 import time
 from dataclasses import dataclass, replace
 
-from syswatch_client import DEFAULT_TIMEOUT_MS, ClientResult, read_status, read_suggestions
+from syswatch_client import ClientResult
+from syswatch_transport import NonblockingRequest
 
 DEFAULT_STATUS_INTERVAL_MS = 1000
 DEFAULT_SUGGESTIONS_INTERVAL_MS = 5000
 MIN_STATUS_INTERVAL_MS = 1000
 MIN_SUGGESTIONS_INTERVAL_MS = 5000
 STALE_FACTOR = 3
+REQUEST_DEADLINE_MS = 250
+PROGRESS_MS = 10
+BACKOFF_MIN_MS = 1000
+BACKOFF_MAX_MS = 10000
 
 LIVE_STATES = ("available", "stale")
 FLOORS = {"status": MIN_STATUS_INTERVAL_MS, "suggestions": MIN_SUGGESTIONS_INTERVAL_MS}
+COMMANDS = {"status": "status", "suggestions": "suggestions"}
 
 
 @dataclass(frozen=True)
@@ -99,10 +106,9 @@ class TelemetryCache:
         *,
         status_interval_ms=DEFAULT_STATUS_INTERVAL_MS,
         suggestions_interval_ms=DEFAULT_SUGGESTIONS_INTERVAL_MS,
-        timeout_ms=DEFAULT_TIMEOUT_MS,
+        deadline_ms=REQUEST_DEADLINE_MS,
         socket_path=None,
-        read_status=read_status,
-        read_suggestions=read_suggestions,
+        request_factory=NonblockingRequest,
         now_ms=None,
         monotonic_ms=None,
     ):
@@ -112,20 +118,18 @@ class TelemetryCache:
                 raise TypeError(f"{channel} interval must be an integer")
             if interval < FLOORS[channel]:
                 raise ValueError(f"{channel} interval must be at least {FLOORS[channel]} ms")
-        if not (callable(read_status) and callable(read_suggestions)):
-            raise TypeError("readers must be callable")
+        if not callable(request_factory):
+            raise TypeError("request_factory must be callable")
         self._intervals = intervals
-        self._timeout_ms = timeout_ms
+        self._deadline_ms = deadline_ms
         self._socket_path = socket_path
-        self._read_status = read_status
-        self._read_suggestions = read_suggestions
+        self._request_factory = request_factory
         self._now_ms = now_ms or _wall_ms
         self._mono_ms = monotonic_ms or _mono_ms
         self._snapshot = _Snapshot()
         self._due = {"status": 0, "suggestions": 0}
-        self._lifecycle = threading.Lock()
-        self._stop_event = threading.Event()
-        self._thread = None
+        self._failures = {"status": 0, "suggestions": 0}
+        self._active = None  # (channel, request) while one request is in flight
 
     def view(self):
         snapshot = self._snapshot
@@ -137,6 +141,49 @@ class TelemetryCache:
             ),
             revision=snapshot.revision,
         )
+
+    def advance(self, mono_ms):
+        """Take one nonblocking step. Return ms until the next useful call."""
+        if self._active is None:
+            channel = self._next_due_channel(mono_ms)
+            if channel is None:
+                return max(0, min(self._due.values()) - mono_ms)
+            request = self._request_factory(
+                COMMANDS[channel],
+                self._socket_path,
+                mono_ms + self._deadline_ms,
+                self._now_ms,
+                STALE_FACTOR * self._intervals[channel],
+            )
+            self._active = (channel, request)
+        channel, request = self._active
+        result = request.advance(mono_ms)
+        if result is None:
+            return PROGRESS_MS
+        self._active = None
+        self._ingest(channel, result, mono_ms)
+        self._schedule_next(channel, result, mono_ms)
+        return max(0, min(self._due.values()) - mono_ms)
+
+    def close(self):
+        """Cancel the request in flight, if any. The last view stays readable."""
+        if self._active is not None:
+            self._active[1].cancel()
+            self._active = None
+
+    def _next_due_channel(self, mono_ms):
+        ready = [c for c in ("status", "suggestions") if self._due[c] <= mono_ms]
+        return min(ready, key=lambda c: self._due[c]) if ready else None
+
+    def _schedule_next(self, channel, result, mono_ms):
+        interval = self._intervals[channel]
+        if result.state in LIVE_STATES or result.state == "warming_up":
+            self._failures[channel] = 0
+            self._due[channel] = mono_ms + interval
+            return
+        self._failures[channel] += 1
+        backoff = min(BACKOFF_MIN_MS * 2 ** (self._failures[channel] - 1), BACKOFF_MAX_MS)
+        self._due[channel] = mono_ms + backoff
 
     def _ingest(self, channel, result, fetched_mono_ms):
         if not isinstance(result, ClientResult):
@@ -159,70 +206,19 @@ class TelemetryCache:
             **{channel: new},
         )
 
-    def _step(self, mono_ms):
-        readers = {"status": self._read_status, "suggestions": self._read_suggestions}
-        for channel in ("status", "suggestions"):
-            if mono_ms < self._due[channel]:
-                continue
-            interval = self._intervals[channel]
-            try:
-                result = readers[channel](
-                    self._socket_path,
-                    timeout_ms=self._timeout_ms,
-                    now_ms=self._now_ms(),
-                    max_age_ms=STALE_FACTOR * interval,
-                )
-            except Exception:  # shortcut: reader bugs are silent until next tick, add logging when diagnosing
-                result = None
-            completion = self._mono_ms()
-            if result is not None:
-                self._ingest(channel, result, completion)
-            self._due[channel] = completion + interval
-        return min(self._due.values())
-
-    def _run(self):
-        while not self._stop_event.is_set():
-            next_due = self._step(self._mono_ms())
-            self._stop_event.wait(max(0, next_due - self._mono_ms()) / 1000)
-
-    def start(self):
-        with self._lifecycle:
-            if self._thread is not None and self._thread.is_alive():
-                if not self._stop_event.is_set():
-                    return
-                self._thread.join()
-            self._stop_event.clear()
-            self._due = {"status": 0, "suggestions": 0}
-            self._thread = threading.Thread(target=self._run, name="syswatch-refresh", daemon=True)
-            self._thread.start()
-
-    def stop(self, timeout=2.0):
-        with self._lifecycle:
-            self._stop_event.set()
-            if self._thread is not None:
-                self._thread.join(timeout)
-                if not self._thread.is_alive():
-                    self._thread = None
-
 
 _shared = None
-_shared_lock = threading.Lock()
 
 
 def get_shared(**kwargs):
     global _shared
-    with _shared_lock:
-        if _shared is None:
-            _shared = TelemetryCache(**kwargs)
-        return _shared
+    if _shared is None:
+        _shared = TelemetryCache(**kwargs)
+    return _shared
 
 
 def stop_shared():
     global _shared
-    with _shared_lock:
-        if _shared is not None:
-            _shared.stop()
-            _shared = None
-
-
-atexit.register(stop_shared)
+    if _shared is not None:
+        _shared.close()
+        _shared = None

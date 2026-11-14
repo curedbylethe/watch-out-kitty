@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from syswatch_cache import get_shared  # noqa: E402
+from syswatch_refresh import install_refresh_timer  # noqa: E402
 from syswatch_redraw import install_redraw_timer  # noqa: E402
 
 _started = False
@@ -32,7 +33,7 @@ def draw_tab(draw_data, screen, tab, before, max_tab_length, index, is_last, ext
     global _started, _timer_ok, _cache
     if not _started:
         _cache = get_shared()
-        _cache.start()
+        install_refresh_timer(_cache)
         _timer_ok = install_redraw_timer(_cache.view)
         _started = True
     if not is_last:

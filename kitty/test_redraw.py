@@ -183,9 +183,11 @@ class ProbeTest(unittest.TestCase):
         probe_tab_bar._cache = None
         self.screen = FakeScreen()
         self.installs = []
+        self.refreshes = []
         self.cache = FakeCache(TelemetryCache(monotonic_ms=lambda: 0).view())
         self.patch("get_shared", lambda **kwargs: self.cache)
         self.patch("install_redraw_timer", self.install)
+        self.patch("install_refresh_timer", self.install_refresh)
 
     def patch(self, name, replacement):
         patcher = mock.patch.object(probe_tab_bar, name, replacement)
@@ -195,6 +197,10 @@ class ProbeTest(unittest.TestCase):
     def install(self, view):
         self.installs.append(view)
         return False
+
+    def install_refresh(self, cache):
+        self.refreshes.append(cache)
+        return True
 
     def draw(self, is_last):
         return probe_tab_bar.draw_tab(None, self.screen, None, 3, 10, 1, is_last, None)
@@ -228,7 +234,7 @@ class ProbeTest(unittest.TestCase):
     def test_timer_is_installed_once_across_draws(self):
         self.draw(is_last=True)
         self.draw(is_last=True)
-        self.assertEqual(self.cache.started, 1)
+        self.assertEqual(len(self.refreshes), 1)
         self.assertEqual(len(self.installs), 1)
 
     def test_probe_source_does_no_io_or_config_writes(self):

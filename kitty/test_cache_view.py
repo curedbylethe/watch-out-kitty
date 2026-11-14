@@ -136,7 +136,7 @@ class CacheViewTest(unittest.TestCase):
             elif isinstance(node, ast.ImportFrom) and node.level == 0:
                 names.add(node.module.split(".")[0])
         self.assertFalse(names & {"kitty", "socket", "subprocess", "asyncio"})
-        self.assertLessEqual(names, set(sys.stdlib_module_names) | {"syswatch_client"})
+        self.assertLessEqual(names, set(sys.stdlib_module_names) | {"syswatch_client", "syswatch_transport"})
 
 
 if __name__ == "__main__":
