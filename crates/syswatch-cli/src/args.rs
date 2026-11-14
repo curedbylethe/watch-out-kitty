@@ -13,10 +13,14 @@ Commands:
   suggestions  Show cached advisory findings for review; never acts on a process
   inspect  Explain one cached advisory finding (pid-start_time_secs-kind)
   close  Preview one finding, then request SIGTERM after you type yes
+  version  Print the version and exit
   help    Show this help
 
 Options:
-  -h, --help  Show this help";
+  -h, --help  Show this help
+  -V, --version  Print the version and exit";
+
+pub const VERSION: &str = concat!("syswatch ", env!("CARGO_PKG_VERSION"));
 
 pub const TOP_USAGE: &str = "Usage: syswatch top [--sort memory|cpu] [--limit N]
 
@@ -65,6 +69,7 @@ pub enum Command {
     InspectHelp,
     Close { reference: FindingId },
     CloseHelp,
+    Version,
     Help,
 }
 
@@ -86,6 +91,8 @@ pub fn parse(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
         "help" | "-h" | "--help" => parse_help(&command, args),
         "status" if args.next().is_none() => Ok(Command::Status),
         "status" => Err(usage_error("status accepts no arguments")),
+        "version" | "-V" | "--version" if args.next().is_none() => Ok(Command::Version),
+        "version" | "-V" | "--version" => Err(usage_error("version accepts no arguments")),
         "top" => parse_top(args),
         "suggestions" => parse_suggestions(args),
         "inspect" => parse_inspect(args),
@@ -243,7 +250,9 @@ fn parse_top(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
 
 #[cfg(test)]
 mod tests {
-    use super::{CLOSE_USAGE, Command, INSPECT_USAGE, SUGGESTIONS_USAGE, TOP_USAGE, USAGE, parse};
+    use super::{
+        CLOSE_USAGE, Command, INSPECT_USAGE, SUGGESTIONS_USAGE, TOP_USAGE, USAGE, VERSION, parse,
+    };
     const USAGE_MARKER: &str = "syswatch:";
     use syswatch_core::{
         findings::{FindingId, FindingKind},
@@ -282,6 +291,30 @@ mod tests {
             parse(args(&["status", "extra"]))
                 .unwrap_err()
                 .contains("status accepts no arguments")
+        );
+    }
+
+    #[test]
+    fn version_spellings_are_accepted() {
+        for spelling in ["version", "-V", "--version"] {
+            assert_eq!(parse(args(&[spelling])), Ok(Command::Version), "{spelling}");
+        }
+    }
+
+    #[test]
+    fn version_rejects_extra_arguments() {
+        for spelling in ["version", "-V", "--version"] {
+            let error = parse(args(&[spelling, "extra"])).unwrap_err();
+            assert!(error.contains("version accepts no arguments"), "{error}");
+            assert!(error.contains(USAGE), "usage missing from {error}");
+        }
+    }
+
+    #[test]
+    fn version_text_carries_the_crate_version() {
+        assert_eq!(
+            VERSION.strip_prefix("syswatch "),
+            Some(env!("CARGO_PKG_VERSION"))
         );
     }
 

@@ -38,6 +38,10 @@ fn main() {
             println!("{}", args::USAGE);
             return;
         }
+        args::Command::Version => {
+            println!("{}", args::VERSION);
+            return;
+        }
         args::Command::TopHelp => {
             println!("{}", args::TOP_USAGE);
             return;
@@ -87,6 +91,7 @@ fn main() {
             output::render_inspect(&response, reference, now_ms)
         }
         args::Command::Help => return,
+        args::Command::Version => return,
         args::Command::TopHelp => return,
         args::Command::SuggestionsHelp => return,
         args::Command::InspectHelp => return,

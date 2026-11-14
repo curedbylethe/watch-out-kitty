@@ -204,6 +204,23 @@ fn close_without_a_terminal_aborts_before_any_request() {
 }
 
 #[test]
+fn version_command_prints_the_binary_version_without_a_daemon() {
+    let dir = TempDir::new();
+    let socket = socket_path(&dir);
+
+    for spelling in ["version", "-V", "--version"] {
+        let output = run_cli(&socket, &[spelling]);
+        assert!(output.status.success(), "{spelling}");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            format!("syswatch {}\n", env!("CARGO_PKG_VERSION")),
+            "{spelling}"
+        );
+        assert!(output.stderr.is_empty(), "{spelling}");
+    }
+}
+
+#[test]
 fn close_help_exits_zero() {
     let dir = TempDir::new();
 
