@@ -6,6 +6,7 @@ pub mod latest;
 pub mod sampler;
 pub mod scheduler;
 pub mod signals;
+pub mod update_check;
 
 use std::{error::Error, fmt, io};
 

@@ -268,7 +268,13 @@ where
                         cached
                             .snapshot
                             .as_ref()
-                            .map_or_else(snapshot_unavailable, Response::status)
+                            .map_or_else(snapshot_unavailable, |snapshot| {
+                                Response::status_with(
+                                    snapshot,
+                                    env!("CARGO_PKG_VERSION"),
+                                    cached.update.as_ref(),
+                                )
+                            })
                     }
                     RequestCommand::Processes => {
                         let cached = latest();
@@ -394,6 +400,7 @@ mod tests {
             || Cached {
                 snapshot: Some(snapshot()),
                 suggestions: None,
+                update: None,
             },
             no_action,
         )
@@ -465,6 +472,7 @@ mod tests {
                     processes_updated_at_ms: 6,
                     findings: vec![],
                 }),
+                update: None,
             },
             no_action,
         )
@@ -530,6 +538,7 @@ mod tests {
                 Cached {
                     snapshot: Some(snapshot()),
                     suggestions: None,
+                    update: None,
                 }
             },
             no_action,
@@ -554,7 +563,8 @@ mod tests {
                 dir.socket(),
                 || Cached {
                     snapshot: Some(snapshot()),
-                    suggestions: None
+                    suggestions: None,
+                    update: None,
                 },
                 no_action
             )
@@ -592,7 +602,8 @@ mod tests {
                 dir.socket(),
                 || Cached {
                     snapshot: Some(snapshot()),
-                    suggestions: None
+                    suggestions: None,
+                    update: None,
                 },
                 no_action
             )
@@ -625,7 +636,8 @@ mod tests {
                 dir.socket(),
                 || Cached {
                     snapshot: Some(snapshot()),
-                    suggestions: None
+                    suggestions: None,
+                    update: None,
                 },
                 no_action
             )

@@ -45,6 +45,21 @@ fn status_response_carries_the_aggregate_and_freshness() {
 }
 
 #[test]
+fn status_response_carries_the_build_version_and_no_update_while_check_is_disabled() {
+    let dir = TempDir::new();
+    let daemon = Daemon::start(&dir);
+    let line = poll(&daemon, RequestCommand::Status, |line| {
+        line.contains("\"kind\":\"status\"")
+    });
+    assert!(line.contains("\"build_version\":\""));
+    assert!(line.contains(&format!(
+        "\"build_version\":\"{}\"",
+        env!("CARGO_PKG_VERSION")
+    )));
+    assert!(!line.contains("\"update\""));
+}
+
+#[test]
 fn status_freshens_after_an_aggregate_interval() {
     let dir = TempDir::new();
     let daemon = Daemon::start(&dir);

@@ -386,6 +386,8 @@ mod tests {
             },
             process_count,
             processes_updated_at_ms: process_count.map(|_| 1_700_000_000_023),
+            build_version: None,
+            update: None,
         }
     }
 
