@@ -163,11 +163,6 @@ pub enum Response {
 }
 
 impl Response {
-    /// Build a status response for this build, with no update notice.
-    pub fn status(snapshot: &SystemSnapshot) -> Self {
-        Self::status_with(snapshot, env!("CARGO_PKG_VERSION"), None)
-    }
-
     /// Build a status response from a system snapshot, the running build
     /// version, and an optional update notice.
     pub fn status_with(
@@ -719,7 +714,8 @@ mod tests {
             ),
             (None, vec![process("worker", 42)], None),
         ] {
-            let response = Response::status(&snapshot(None, updated_at_ms, processes));
+            let response =
+                Response::status_with(&snapshot(None, updated_at_ms, processes), "0.1.0", None);
             let line = encode_line(&response).unwrap();
             assert!(line.contains(&format!(
                 "\"process_count\":{}",
@@ -730,7 +726,12 @@ mod tests {
 
     #[test]
     fn warm_up_cpu_serializes_as_null() {
-        let line = encode_line(&Response::status(&snapshot(None, None, vec![]))).unwrap();
+        let line = encode_line(&Response::status_with(
+            &snapshot(None, None, vec![]),
+            "0.1.0",
+            None,
+        ))
+        .unwrap();
         assert!(line.contains("\"cpu_updated_at_ms\":null"));
         assert!(!line.contains("\"cpu_updated_at_ms\":0"));
     }
@@ -747,7 +748,7 @@ mod tests {
             ],
         );
         for response in [
-            Response::status(&snapshot),
+            Response::status_with(&snapshot, "0.1.0", None),
             Response::processes(&snapshot),
             Response::suggestions(Some(&suggestions(vec![finding(42)]))),
         ] {
