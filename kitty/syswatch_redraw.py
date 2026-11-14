@@ -3,9 +3,10 @@
 Four non-public Kitty symbols are used, and only here:
 `kitty.fast_data_types.add_timer`, `kitty.fast_data_types.wakeup_main_loop`,
 `kitty.boss.get_boss().os_window_map`, and `TabManager.mark_tab_bar_dirty()`.
-Re-run the probe after a Kitty upgrade. Remove or adapt this module when Kitty
-offers a public repaint call. `install_redraw_timer` returning False is the
-fallback: the bar then repaints only when Kitty already redraws.
+After a Kitty upgrade, check that the indicator still updates on an idle window.
+Remove or adapt this module when Kitty offers a public repaint call.
+`install_redraw_timer` returning False is the fallback: the bar then repaints
+only when Kitty already redraws.
 
 Why the wakeup: on Kitty 0.49.2 `mark_tab_bar_dirty()` only clears a flag, and a
 timer callback does not request a main-loop tick. The flag is consumed at the
