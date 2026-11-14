@@ -220,7 +220,7 @@ mod tests {
             processes: Vec::new(),
             processes_updated_at_ms: Some(1_700_000_000_100),
         };
-        let expected = Response::status(&snapshot);
+        let expected = Response::status_with(&snapshot, "0.1.0", None);
         let wire = format!("{}\n", protocol::encode_line(&expected).unwrap());
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
