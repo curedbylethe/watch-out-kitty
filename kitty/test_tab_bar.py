@@ -56,7 +56,6 @@ class FakeScreen:
 
 class TabBarTest(unittest.TestCase):
     def setUp(self):
-        tab_bar._started = False
         tab_bar._cache = None
         _fade.calls.clear()
         self.cache = TelemetryCache(monotonic_ms=lambda: 0)
@@ -161,8 +160,7 @@ class TabBarTest(unittest.TestCase):
         self.assertEqual((self.refresh.call_count, self.redraw.call_count), (1, 1))
         self.refresh.assert_called_with(self.cache)
         self.redraw.assert_called_with(self.cache.view)
-        tab_bar._started = False  # a config reload re-runs the module
-        tab_bar._cache = None
+        tab_bar._cache = None  # a config reload re-runs the module
         self.draw_bar()
         self.assertEqual((self.refresh.call_count, self.redraw.call_count), (2, 2))
 

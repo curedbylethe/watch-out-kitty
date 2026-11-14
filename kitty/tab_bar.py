@@ -22,19 +22,17 @@ from syswatch_indicator import GAP_COLUMNS, fit, render  # noqa: E402
 from syswatch_redraw import install_redraw_timer  # noqa: E402
 from syswatch_refresh import install_refresh_timer  # noqa: E402
 
-_started = False
 _cache = None
 # Widest indicator text, the gap, and Kitty's trailing space after the last tab.
 RESERVE = len("CPU 100%  RAM 100%") + GAP_COLUMNS + 1
 
 
 def draw_tab(draw_data, screen, tab, before, max_tab_length, index, is_last, extra_data):
-    global _started, _cache
-    if not _started:
+    global _cache
+    if _cache is None:
         _cache = get_shared()
         install_refresh_timer(_cache)
         install_redraw_timer(_cache.view)
-        _started = True
     shown = is_last and not extra_data.for_layout and draw_data.tab_bar_edge in ("top", "bottom")
     if shown:
         # Kitty truncates a long title to this budget; the text keeps its columns.
