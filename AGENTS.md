@@ -36,6 +36,13 @@ Add or update relevant tests for behavior changes. CI runs formatting, Clippy,
 tests, and the Python client suite (Python 3.15) on Ubuntu 24.04; it does not
 run a separate build job.
 
+The Python suite is part of the gate. It runs headless and must stay standard
+library only. It must not require Kitty, a display, a running daemon, the
+user's socket path, or network access; use fakes and temporary sockets. Behavior
+that needs a real Kitty session (rendering, repaint cadence, themes, single-tab
+visibility, config reload) is verified by the manual checklist in `README.md` and
+recorded in the pull request, never by a skipped test.
+
 ## Data semantics
 
 Memory fields and process memory use bytes. Usage fields are percentages.
