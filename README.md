@@ -231,10 +231,10 @@ Steps:
    cargo build --workspace
    ```
 
-2. Link the adapter as `tab_bar.py` into the directory that holds the `kitty.conf` Kitty loads. Kitty uses `$KITTY_CONFIG_DIRECTORY` when set; otherwise it uses the first existing file of `$XDG_CONFIG_HOME/kitty/kitty.conf`, `~/.config/kitty/kitty.conf`, `~/Library/Preferences/kitty/kitty.conf` and `$XDG_CONFIG_DIRS/kitty/kitty.conf`. The command below assumes `~/.config/kitty`; if your loaded `kitty.conf` is elsewhere, use that directory. Kitty's `edit_config_file` action shows the path. Kitty reads these variables; the adapter does not.
+2. Link the adapter as `tab_bar.py` into the directory that holds the `kitty.conf` Kitty loads. Kitty uses `$KITTY_CONFIG_DIRECTORY` when set; otherwise it uses the first existing file of `$XDG_CONFIG_HOME/kitty/kitty.conf`, `~/.config/kitty/kitty.conf`, `~/Library/Preferences/kitty/kitty.conf` and `$XDG_CONFIG_DIRS/kitty/kitty.conf`. The command below assumes `~/.config/kitty`; if your loaded `kitty.conf` is elsewhere, use that directory. Kitty's `edit_config_file` action (⌘, on macOS) shows the path. Kitty reads these variables; the adapter does not.
 
    ```sh
-   ln -s "$PWD/kitty/tab_bar.py" "${KITTY_CONFIG_DIRECTORY:-${XDG_CONFIG_HOME:-$HOME/.config}/kitty}/tab_bar.py"
+   ln -s "$PWD/kitty/tab_bar.py" "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}/tab_bar.py"
    ```
 
    Use a symlink, not a copy: the file finds the adapter modules next to its real path. If `ln` reports `File exists`, read [Existing tab_bar.py](#existing-tab_barpy) before you do anything else.
