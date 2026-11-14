@@ -215,10 +215,3 @@ def get_shared(**kwargs):
     if _shared is None:
         _shared = TelemetryCache(**kwargs)
     return _shared
-
-
-def stop_shared():
-    global _shared
-    if _shared is not None:
-        _shared.close()
-        _shared = None
