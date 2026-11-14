@@ -103,12 +103,11 @@ The suite cannot reach a real Kitty window. Run these checks in order, in a macO
 5. `tab_bar_edge top`, then `bottom`: the indicator is present on both. `left` or `right`: the tabs draw and no indicator appears.
 6. Switch between the dark and light macOS appearance: the text stays readable in both, with no fixed color.
 7. No daemon running: the indicator shows `syswatch offline`.
-8. Start `syswatch-daemon`: the indicator shows `CPU --  RAM --`, then numbers. `syswatch status` shows the same values.
+8. Start `syswatch-daemon`: the indicator shows `CPU --  RAM --`, then numbers. `cargo run -q -p syswatch-cli -- status` shows the same values.
 9. Leave one window idle for several minutes: the numbers keep changing. If they change only when you interact, record that as the repaint fallback. [Issue #80](https://github.com/curedbylethe/watch-out-kitty/issues/80) tracks this check; run it here once and do not file a duplicate.
 10. Stop the daemon while Kitty runs: the indicator shows `syswatch offline` without a restart. Start the daemon again: the numbers return.
 11. With a current finding, the marker shows `!N`. After the finding clears, the marker disappears. With the daemon down, no marker appears beside `syswatch offline`.
 12. Remove the integration by the [Removal](#removal) steps. After the Kitty restart the bar has its previous appearance.
-13. If you use the second-symlink variant in [Existing tab_bar.py](#existing-tab_barpy), repeat items 1 to 3 with it, and record how the last tab draws.
 
 Record each item as pass, fail, or skipped with the reason, with the Kitty and macOS versions, in the pull request. A failed item is a documentation change or a code bug; do not change the checklist to match a failure.
 
@@ -214,16 +213,16 @@ Steps:
    cargo build --workspace
    ```
 
-2. Link the adapter as `tab_bar.py` in your Kitty config directory. The directory is `$KITTY_CONFIG_DIRECTORY` when set, otherwise `~/.config/kitty`. Kitty reads that variable; the adapter does not.
+2. Link the adapter as `tab_bar.py` in your Kitty config directory. The directory is `$KITTY_CONFIG_DIRECTORY` when set, otherwise `$XDG_CONFIG_HOME/kitty`, otherwise `~/.config/kitty`. Kitty reads these variables; the adapter does not.
 
    ```sh
-   ln -s "$PWD/kitty/tab_bar.py" "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}/tab_bar.py"
+   ln -s "$PWD/kitty/tab_bar.py" "${KITTY_CONFIG_DIRECTORY:-${XDG_CONFIG_HOME:-$HOME/.config}/kitty}/tab_bar.py"
    ```
 
    Use a symlink, not a copy: the file finds the adapter modules next to its real path. If `ln` reports `File exists`, read [Existing tab_bar.py](#existing-tab_barpy) before you do anything else.
 
 3. Set the three options shown below in `kitty.conf`.
-4. Start the daemon, then restart Kitty. Kitty loads `tab_bar.py` once, so a restart is needed after each change.
+4. Start the daemon in a terminal other than the Kitty window you restart, then restart Kitty. The daemon runs in the foreground and stops when its terminal closes. Kitty loads `tab_bar.py` once, so a restart is needed after each change.
 
 Options for `kitty.conf`:
 
@@ -251,13 +250,13 @@ Kitty loads one `tab_bar.py` per config directory, and nothing is merged automat
 
 - **No `tab_bar.py` yet.** Use the link from step 2. Keep your customization in `tab_title_template`; the adapter keeps it.
 - **Your `tab_bar.py` must stay as it is.** Do not install this adapter.
-- **Your `tab_bar.py` must keep drawing the tabs.** Link the adapter under a second name in the same directory, for example `syswatch_tab_bar.py`. The adapter finds its modules from its real path, so the link name is free. In your `tab_bar.py`, run `from syswatch_tab_bar import draw_tab` and call it for the last tab. The last tab then uses Kitty's fade drawing. This variant is not yet verified on a real session; check it with the manual checklist before you rely on it.
+- **Your `tab_bar.py` must keep drawing the tabs.** These steps do not cover this case. Do not install this adapter over it; the adapter does not yet compose with a custom `tab_bar.py`.
 
 #### Troubleshooting
 
 | Symptom | Check | Fix |
 | :--- | :--- | :--- |
-| No indicator | `ls -l "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}/tab_bar.py"` shows a link to `kitty/tab_bar.py`, and `kitty.conf` has the three options | Set the options above, restart Kitty, and widen the window if the title is too long. A regular file under that name is another `tab_bar.py`; see [Existing tab_bar.py](#existing-tab_barpy). |
+| No indicator | `ls -l "${KITTY_CONFIG_DIRECTORY:-${XDG_CONFIG_HOME:-$HOME/.config}/kitty}/tab_bar.py"` shows a link to `kitty/tab_bar.py`, and `kitty.conf` has the three options | Set the options above, restart Kitty, and widen the window if the title is too long. A regular file under that name is another `tab_bar.py`; see [Existing tab_bar.py](#existing-tab_barpy). |
 | `syswatch offline` | `cargo run -q -p syswatch-cli -- status; echo "exit=$?"` prints `exit=1` when no daemon is running | Start `cargo run -p syswatch-daemon` in a terminal and leave it running. |
 | Socket permission error | `ls -ld` on the socket directory and the socket, using the path from [Daemon socket](#daemon-socket). The directory should be `drwx------` and the socket `srw-------` | Remove other users' access. The daemon and the adapter must resolve the same path, so set `SYSWATCH_SOCKET` to the same absolute path for both. |
 | Stale or frozen numbers | `cargo run -q -p syswatch-cli -- status` prints `Sampled: <age> ago`. A small age with an unchanged indicator means Kitty has not repainted | A large age means the daemon is not sampling; restart it. A small age means an idle window; see [Kitty cache and refresh](#kitty-cache-and-refresh) and check after each Kitty upgrade. |
@@ -268,11 +267,11 @@ Kitty loads one `tab_bar.py` per config directory, and nothing is merged automat
 Reverse the install in this order:
 
 1. Stop the daemon: press Ctrl-C in its terminal.
-2. Remove the link, not the file it points to: `rm "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}/tab_bar.py"`. Run `ls -l` first; if the entry is a regular file, it is not this adapter, so leave it.
+2. Remove the link, not the file it points to: `rm "${KITTY_CONFIG_DIRECTORY:-${XDG_CONFIG_HOME:-$HOME/.config}/kitty}/tab_bar.py"`. Run `ls -l` first; if the entry is a regular file, it is not this adapter, so leave it.
 3. Remove the three lines from `kitty.conf`.
 4. Restart Kitty. Removing the link while Kitty runs does not unload the bar until the restart.
 
-The adapter writes no files and keeps its view in memory; the daemon keeps its state in memory too. Nothing is left behind. If you no longer want the socket, remove the socket file and its directory.
+The adapter writes no files and keeps its view in memory; the daemon keeps its state in memory too. On a clean stop the daemon removes the socket file. Its directory stays; remove it if you want it gone.
 
 ## Project files
 
