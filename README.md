@@ -267,7 +267,7 @@ Kitty loads one `tab_bar.py` per config directory, and nothing is merged automat
 
 - **No `tab_bar.py` yet.** Use the link from step 2. Keep your customization in `tab_title_template`; the adapter keeps it.
 - **Your `tab_bar.py` must stay as it is.** Do not install this adapter.
-- **Your `tab_bar.py` must keep drawing the tabs.** These steps do not cover this case. Do not install this adapter over it; the adapter does not yet compose with a custom `tab_bar.py`.
+- **Your `tab_bar.py` must keep drawing the tabs.** These steps do not cover this case. Do not install this adapter over it; the adapter does not compose with a custom `tab_bar.py`.
 
 #### Troubleshooting
 
