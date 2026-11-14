@@ -231,6 +231,27 @@ Kitty loads one `tab_bar.py` per config directory, and nothing is merged automat
 - **Your `tab_bar.py` must stay as it is.** Do not install this adapter.
 - **Your `tab_bar.py` must keep drawing the tabs.** Link the adapter under a second name in the same directory, for example `syswatch_tab_bar.py`. The adapter finds its modules from its real path, so the link name is free. In your `tab_bar.py`, run `from syswatch_tab_bar import draw_tab` and call it for the last tab. The last tab then uses Kitty's fade drawing. This variant is not yet verified on a real session; check it with the manual checklist before you rely on it.
 
+#### Troubleshooting
+
+| Symptom | Check | Fix |
+| :--- | :--- | :--- |
+| No indicator | `ls -l "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}/tab_bar.py"` shows a link to `kitty/tab_bar.py`, and `kitty.conf` has the three options | Set the options above, restart Kitty, and widen the window if the title is too long. A regular file under that name is another `tab_bar.py`; see [Existing tab_bar.py](#existing-tab_barpy). |
+| `syswatch offline` | `cargo run -q -p syswatch-cli -- status; echo "exit=$?"` prints `exit=1` when no daemon is running | Start `cargo run -p syswatch-daemon` in a terminal and leave it running. |
+| Socket permission error | `ls -ld` on the socket directory and the socket, using the path from [Daemon socket](#daemon-socket). The directory should be `drwx------` and the socket `srw-------` | Remove other users' access. The daemon and the adapter must resolve the same path, so set `SYSWATCH_SOCKET` to the same absolute path for both. |
+| Stale or frozen numbers | `cargo run -q -p syswatch-cli -- status` prints `Sampled: <age> ago`. A small age with an unchanged indicator means Kitty has not repainted | A large age means the daemon is not sampling; restart it. A small age means an idle window; see [Kitty cache and refresh](#kitty-cache-and-refresh) and check after each Kitty upgrade. |
+| Changes not applied | Kitty loads `tab_bar.py` once, at startup | Restart Kitty after each change to `kitty.conf` or `tab_bar.py`. |
+
+#### Removal
+
+Reverse the install in this order:
+
+1. Stop the daemon: press Ctrl-C in its terminal.
+2. Remove the link, not the file it points to: `rm "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}/tab_bar.py"`. Run `ls -l` first; if the entry is a regular file, it is not this adapter, so leave it.
+3. Remove the three lines from `kitty.conf`.
+4. Restart Kitty. Removing the link while Kitty runs does not unload the bar until the restart.
+
+The adapter writes no files and keeps its view in memory; the daemon keeps its state in memory too. Nothing is left behind. If you no longer want the socket, remove the socket file and its directory.
+
 ## Project files
 
 | Path | Contents |
