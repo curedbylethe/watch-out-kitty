@@ -10,7 +10,8 @@ fn run() -> Result<(), DaemonError> {
     let (receiver, signal_handle) = signals::install().map_err(DaemonError::Signal)?;
     let mut scheduler = Scheduler::new(SystemClock::new(receiver), sampler, config);
     eprintln!(
-        "syswatch-daemon: aggregate {:?}, processes {:?}",
+        "syswatch-daemon: version {}, aggregate {:?}, processes {:?}",
+        env!("CARGO_PKG_VERSION"),
         config.aggregate_interval(),
         config.process_interval()
     );
