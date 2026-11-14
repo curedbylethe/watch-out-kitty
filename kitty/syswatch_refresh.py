@@ -6,12 +6,27 @@ reviving a stopped cache. Kitty's `add_timer` is looked up lazily, so this
 module imports without Kitty installed.
 """
 
+import sys
 import time
 
 BACKOFF_ON_ERROR_MS = 1000
+MAX_REPORTED_ERRORS = 32
 
 _cache = None
 _generation = 0
+_reported = set()
+
+
+def report_error(where, exc):
+    """Print each distinct error once to stderr (Kitty's log). Never raises."""
+    key = (where, type(exc).__name__, str(exc))
+    if key in _reported or len(_reported) >= MAX_REPORTED_ERRORS:
+        return
+    _reported.add(key)
+    try:
+        print(f"syswatch: {where}: {type(exc).__name__}: {exc}", file=sys.stderr)
+    except Exception:  # a closed stderr must not break the timer chain
+        pass
 
 
 def _mono_ms():
@@ -28,7 +43,8 @@ def _tick(generation, add_timer):
         return
     try:
         delay_ms = _cache.advance(_mono_ms())
-    except Exception:  # shortcut: a cache bug drops the request and retries later, add logging when diagnosing
+    except Exception as exc:  # a cache bug drops the request and retries later
+        report_error("refresh", exc)
         _cache.close()
         delay_ms = BACKOFF_ON_ERROR_MS
     _schedule(delay_ms, add_timer)

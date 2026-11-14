@@ -1,4 +1,6 @@
+import io
 import unittest
+from contextlib import redirect_stderr
 
 import syswatch_refresh
 from unittest import mock
@@ -139,6 +141,10 @@ class SchedulerTest(unittest.TestCase):
 class RefreshDriverTest(unittest.TestCase):
     def setUp(self):
         syswatch_refresh._cache = None
+        syswatch_refresh._reported.clear()
+        quiet = mock.patch("sys.stderr", io.StringIO())  # expected errors stay out of test output
+        quiet.start()
+        self.addCleanup(quiet.stop)
         self.timers = []
         self.cache = mock.Mock()
         self.cache.advance.return_value = 1000
@@ -175,6 +181,27 @@ class RefreshDriverTest(unittest.TestCase):
         self.fire()
         self.cache.close.assert_called()
         self.assertEqual(self.timers[-1][1], 1.0)
+
+    def test_advance_error_is_printed_once_per_distinct_error(self):
+        syswatch_refresh.install_refresh_timer(self.cache, add_timer=self.add_timer)
+        self.cache.advance.side_effect = RuntimeError("bug")
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.fire()
+            self.fire()
+            self.cache.advance.side_effect = ValueError("other")
+            self.fire()
+        self.assertEqual(
+            err.getvalue().splitlines(),
+            ["syswatch: refresh: RuntimeError: bug", "syswatch: refresh: ValueError: other"],
+        )
+
+    def test_reported_errors_are_bounded(self):
+        err = io.StringIO()
+        with redirect_stderr(err):
+            for i in range(syswatch_refresh.MAX_REPORTED_ERRORS + 10):
+                syswatch_refresh.report_error("refresh", RuntimeError(str(i)))
+        self.assertEqual(len(err.getvalue().splitlines()), syswatch_refresh.MAX_REPORTED_ERRORS)
 
     def test_missing_kitty_timer_returns_false(self):
         self.assertFalse(syswatch_refresh.install_refresh_timer(self.cache))

@@ -18,6 +18,8 @@ value turning stale while no new reply arrives. Module state lives in
 `sys.modules`, so a `tab_bar.py` reload does not install a second timer.
 """
 
+from syswatch_refresh import report_error
+
 REDRAW_INTERVAL_MS = 1000
 
 _timer_id = None
@@ -45,11 +47,11 @@ def _make_tick(get_view, get_tab_managers, wakeup):
             for manager in get_tab_managers():
                 try:
                     manager.mark_tab_bar_dirty()
-                except Exception:  # shortcut: a broken window is skipped silently, add logging when diagnosing
-                    pass
+                except Exception as exc:  # one broken window must not stop the others
+                    report_error("redraw window", exc)
             wakeup()
-        except Exception:  # shortcut: a broken view is skipped silently, add logging when diagnosing
-            pass
+        except Exception as exc:  # never let an error escape into Kitty's main loop
+            report_error("redraw", exc)
 
     return tick
 
