@@ -90,6 +90,8 @@ python3 -m unittest discover -s kitty -t kitty -p 'test_*.py'
 
 `cargo test --workspace` also runs the end-to-end daemon and socket tests; they spawn isolated daemon processes in temporary directories and require no running daemon.
 
+The Python suite uses the standard library only and needs no Kitty session. Behavior that needs a real Kitty window is checked by hand, not by the suite.
+
 ### Python client
 
 `kitty/syswatch_client.py` reads the daemon's cached status and suggestions for Kitty integration code. It needs Python 3.11 or newer and the standard library only. Add the `kitty/` directory to `sys.path`, then `import syswatch_client`.
@@ -298,7 +300,7 @@ The adapter writes no files and keeps its view in memory; the daemon keeps its s
 | `kitty/tab_bar.py` | Installable Kitty tab bar: Kitty's tab drawing plus the CPU/RAM indicator and advisory marker |
 | `kitty/syswatch_indicator.py` | Indicator and advisory-marker text from the cached view; pure, no I/O |
 | `kitty/test_*.py` | Python client tests (`unittest`) |
-| `.github/workflows/ci.yml` | Ubuntu build checks |
+| `.github/workflows/ci.yml` | Ubuntu checks: Rust formatting, Clippy, build and tests, and the Python suite |
 | `LICENSE` | Apache-2.0 license |
 
 ## Reading the measurements
