@@ -97,7 +97,7 @@ class TabBarTest(unittest.TestCase):
                     [(c[0], c[1], c[2].title) + c[3:] for c in _fade.calls],
                     [
                         (draw_data, screen, "one", 0, 20, 1, False, extra),
-                        (draw_data, screen, "two", 4, 20, 2, True, extra),
+                        (draw_data, screen, "two", 4, 20 if for_layout else 16, 2, True, extra),
                     ],
                 )
 
@@ -106,6 +106,15 @@ class TabBarTest(unittest.TestCase):
         self.assertEqual(ends[-1], 7)
         self.assertEqual(self.indicator(screen), [(LIVE, 40 - len(LIVE), _as_rgb(FG), _as_rgb(BG))])
         self.assertEqual((screen.cursor.x, screen.cursor.bold, screen.cursor.italic), (40, False, False))
+
+    def test_last_tab_budget_leaves_room_for_indicator(self):
+        for for_layout, budget in ((False, 60 - 20 - 4), (True, 50)):
+            with self.subTest(for_layout=for_layout):
+                _fade.calls.clear()
+                draw_data = types.SimpleNamespace(tab_bar_edge="top", inactive_fg=FG, default_bg=BG)
+                tab = types.SimpleNamespace(title="x" * 50)
+                tab_bar.draw_tab(draw_data, FakeScreen(60), tab, 4, 50, 2, True, types.SimpleNamespace(for_layout=for_layout))
+                self.assertEqual(_fade.calls[0][4], budget)
 
     def test_fit_boundary(self):
         # Tabs leave the cursor at 8; one gap column precedes the text.
