@@ -152,7 +152,7 @@ Limits:
 - When tabs overflow the bar, the indicator is hidden.
 - `tab_bar_align` must stay `start` (the default); `center` and `end` shift the finished line and can clip the text.
 - The indicator is not clickable.
-- It uses the theme's inactive tab foreground on the tab bar background, with no icon font.
+- It uses the theme's inactive tab foreground on the inactive tab background, with no icon font.
 
 Kitty loads one `tab_bar.py` per config directory. If you already have one, do not replace it. Import this file's `draw_tab` from yours and call it, or keep yours and call this one for the last tab. Nothing is merged automatically. Further installation steps, troubleshooting, and removal are planned in [issue #70](https://github.com/curedbylethe/watch-out-kitty/issues/70).
 
