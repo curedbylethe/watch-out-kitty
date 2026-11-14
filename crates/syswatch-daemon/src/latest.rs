@@ -139,10 +139,8 @@ impl LatestSnapshot {
 
 /// A notice is suppressed when the dismissed version is not older than it.
 fn is_dismissed(dismissed: Option<Version>, notice: &UpdateNotice) -> bool {
-    let Some(noticed) = update::parse_tag(&notice.latest_version) else {
-        return false;
-    };
-    dismissed.is_some_and(|version| version >= noticed)
+    update::parse_tag(&notice.latest_version)
+        .is_some_and(|noticed| update::is_dismissed(dismissed, noticed))
 }
 
 #[cfg(test)]
