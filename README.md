@@ -101,7 +101,7 @@ The suite cannot reach a real Kitty window. Run these checks in order, in a macO
 3. Ten or more tabs: every title is readable and none is overwritten. The indicator is at the right edge or hidden, as the limits in [Kitty tab bar](#kitty-tab-bar) describe.
 4. Narrow the window until the indicator disappears: the tabs still draw. Widen it: the indicator returns.
 5. `tab_bar_edge top`, then `bottom`: the indicator is present on both. `left` or `right`: the tabs draw and no indicator appears.
-6. Kitty does not follow the macOS appearance unless `kitty.conf` says so, so switch Kitty's own theme: run `kitty +kitten themes`, choose a dark theme, restart Kitty, then choose a light theme and restart again. The text stays readable in both, with no fixed color.
+6. Kitty follows the macOS appearance only when its config directory holds `dark-theme.auto.conf` or `light-theme.auto.conf` (see Kitty's themes kitten). If neither file exists, switch Kitty's theme yourself: run `kitty +kitten themes`, choose a dark theme, restart Kitty, then choose a light theme and restart again. If the files exist, switch the macOS appearance and restart Kitty in each mode. Either way the text stays readable in both, with no fixed color.
 7. No daemon running: the indicator shows `syswatch offline`.
 8. Start `syswatch-daemon`: the indicator shows `CPU --  RAM --`, then numbers. `cargo run -q -p syswatch-cli -- status` shows the same values.
 9. Leave one window idle for several minutes: the numbers keep changing. If they change only when you interact, record that as the repaint fallback. [Issue #80](https://github.com/curedbylethe/watch-out-kitty/issues/80) tracks this check; run it here once and do not file a duplicate.
