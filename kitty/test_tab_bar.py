@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 
 from syswatch_cache import TelemetryCache
-from syswatch_client import ClientResult, Memory, Status, Suggestions
+from syswatch_client import ClientResult, Evidence, Finding, Memory, Status, Suggestions
 
 
 def _as_rgb(color):
@@ -89,6 +89,11 @@ class TabBarTest(unittest.TestCase):
     def indicator(self, screen):
         return [entry for entry in screen.drawn if entry[0] not in ("one", "two", " ")]
 
+    def suggest(self, count):
+        finding = Finding(42, 7, "memory", "high", 0, "held memory", Evidence(6, 120_000, None, None))
+        suggestions = Suggestions(0, 0, (finding,) * count)
+        self.cache._ingest("suggestions", ClientResult("available", value=suggestions, age_ms=0), 0)
+
     def test_every_tab_is_delegated_and_keeps_its_extent(self):
         for for_layout in (False, True):
             with self.subTest(for_layout=for_layout):
@@ -101,7 +106,7 @@ class TabBarTest(unittest.TestCase):
                     [(c[0], c[1], c[2].title) + c[3:] for c in _fade.calls],
                     [
                         (draw_data, screen, "one", 0, 20, 1, False, extra),
-                        (draw_data, screen, "two", 4, 20 if for_layout else 16, 2, True, extra),
+                        (draw_data, screen, "two", 4, 20, 2, True, extra),
                     ],
                 )
 
@@ -111,8 +116,24 @@ class TabBarTest(unittest.TestCase):
         self.assertEqual(self.indicator(screen), [(LIVE, 40 - len(LIVE), _as_rgb(FG), _as_rgb(BG))])
         self.assertEqual((screen.cursor.x, screen.cursor.bold, screen.cursor.italic), (40, False, False))
 
+    def test_fresh_findings_paint_badge_at_right_edge(self):
+        self.suggest(2)
+        screen, ends = self.draw_bar(columns=40)
+        text = "CPU 12%  RAM 50%  !2"
+        self.assertEqual(self.indicator(screen), [(text, 40 - len(text), _as_rgb(FG), _as_rgb(BG))])
+        self.assertEqual(ends[-1], 7)
+        self.assertEqual(self.indicator(self.draw_bar(for_layout=True)[0]), [])
+
+    def test_badge_fit_boundary(self):
+        self.suggest(2)
+        exact = 8 + 1 + len("CPU 12%  RAM 50%  !2")  # tabs end at 8; one gap column before the text
+        self.assertEqual(len(self.indicator(self.draw_bar(columns=exact)[0])), 1)
+        screen, ends = self.draw_bar(columns=exact - 1)
+        self.assertEqual(self.indicator(screen), [])
+        self.assertEqual(ends, [3, 7])
+
     def test_last_tab_budget_leaves_room_for_indicator(self):
-        for for_layout, budget in ((False, 60 - 20 - 4), (True, 50)):
+        for for_layout, budget in ((False, 60 - 28 - 4), (True, 50)):
             with self.subTest(for_layout=for_layout):
                 _fade.calls.clear()
                 draw_data = types.SimpleNamespace(tab_bar_edge="top", inactive_fg=FG, default_bg=BG)

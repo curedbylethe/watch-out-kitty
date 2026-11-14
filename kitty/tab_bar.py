@@ -18,13 +18,13 @@ from kitty.tab_bar import as_rgb, draw_tab_with_fade
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from syswatch_cache import get_shared  # noqa: E402
-from syswatch_indicator import GAP_COLUMNS, fit, render  # noqa: E402
+from syswatch_indicator import GAP_COLUMNS, MAX_INDICATOR_TEXT, fit, render  # noqa: E402
 from syswatch_redraw import install_redraw_timer  # noqa: E402
 from syswatch_refresh import install_refresh_timer  # noqa: E402
 
 _cache = None
-# Widest indicator text, the gap, and Kitty's trailing space after the last tab.
-RESERVE = len("CPU 100%  RAM 100%") + GAP_COLUMNS + 1
+# Widest indicator text with its advisory marker, the gap, and Kitty's trailing space after the last tab.
+RESERVE = len(MAX_INDICATOR_TEXT) + GAP_COLUMNS + 1
 # Narrower than this, a clamped title would be unreadable, so Kitty draws it whole.
 MIN_TITLE = 9
 
