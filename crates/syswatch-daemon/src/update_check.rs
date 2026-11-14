@@ -24,8 +24,12 @@ pub struct Notifier {
 }
 
 impl Notifier {
-    /// Reports whether `version` is newer than every version already printed.
-    pub fn should_notify(&mut self, version: &Version) -> bool {
+    /// Reports whether `version` is newer than every version already printed
+    /// and newer than the durable dismissal, if any.
+    pub fn should_notify(&mut self, version: &Version, dismissed: Option<Version>) -> bool {
+        if update::is_dismissed(dismissed, *version) {
+            return false;
+        }
         if self.last.is_some_and(|last| last >= *version) {
             return false;
         }
@@ -50,7 +54,10 @@ fn run(latest: Arc<Mutex<LatestSnapshot>>) {
     let mut notifier = Notifier::default();
     loop {
         if let Some(release) = update::check(&CurlRunner, env!("CARGO_PKG_VERSION")) {
-            if notifier.should_notify(&release.version) {
+            let dismissed = update::state_path()
+                .ok()
+                .and_then(|path| update::load_state(&path));
+            if notifier.should_notify(&release.version, dismissed) {
                 eprintln!(
                     "syswatch-daemon: version {} is available at {}; set {}=1 to silence",
                     release.version, release.url, UPDATE_DISABLE_ENV
@@ -85,10 +92,26 @@ mod tests {
     #[test]
     fn notifier_prints_once_per_version_and_again_for_a_newer_one() {
         let mut notifier = Notifier::default();
-        assert!(notifier.should_notify(&version(1, 2, 0)));
-        assert!(!notifier.should_notify(&version(1, 2, 0)));
-        assert!(!notifier.should_notify(&version(1, 1, 9)));
-        assert!(notifier.should_notify(&version(1, 3, 0)));
-        assert!(!notifier.should_notify(&version(1, 3, 0)));
+        assert!(notifier.should_notify(&version(1, 2, 0), None));
+        assert!(!notifier.should_notify(&version(1, 2, 0), None));
+        assert!(!notifier.should_notify(&version(1, 1, 9), None));
+        assert!(notifier.should_notify(&version(1, 3, 0), None));
+        assert!(!notifier.should_notify(&version(1, 3, 0), None));
+    }
+
+    #[test]
+    fn notifier_stays_silent_for_a_dismissed_version_after_a_restart() {
+        let mut notifier = Notifier::default();
+        assert!(!notifier.should_notify(&version(1, 2, 0), Some(version(1, 2, 0))));
+        assert!(!notifier.should_notify(&version(1, 2, 0), Some(version(1, 3, 0))));
+        assert!(notifier.should_notify(&version(1, 2, 0), Some(version(1, 1, 9))));
+        assert!(notifier.should_notify(&version(1, 3, 0), Some(version(1, 2, 0))));
+    }
+
+    #[test]
+    fn a_suppressed_version_still_prints_once_the_dismissal_is_gone() {
+        let mut notifier = Notifier::default();
+        assert!(!notifier.should_notify(&version(1, 2, 0), Some(version(1, 2, 0))));
+        assert!(notifier.should_notify(&version(1, 2, 0), None));
     }
 }

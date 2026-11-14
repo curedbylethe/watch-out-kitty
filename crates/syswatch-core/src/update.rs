@@ -46,6 +46,11 @@ const CURL_ARGS: [&str; 8] = [
     UPDATE_FEED_URL,
 ];
 
+/// A notice at or below a dismissed version stays hidden.
+pub fn is_dismissed(dismissed: Option<Version>, noticed: Version) -> bool {
+    dismissed.is_some_and(|version| version >= noticed)
+}
+
 /// One parsed semantic version. Ordering is numeric per component.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Version {
