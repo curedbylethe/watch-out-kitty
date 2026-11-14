@@ -34,7 +34,7 @@ const MAX_FEED_BYTES: usize = 64 * 1024;
 /// Maximum accepted state file size in bytes.
 const MAX_STATE_BYTES: usize = 1024;
 
-/// A release feed URL with no scheme, token, cookie or query string.
+/// Fixed curl arguments: no cookie, token, query string or machine data.
 const CURL_ARGS: [&str; 8] = [
     "-fsS",
     "--max-time",
