@@ -48,6 +48,10 @@ class FakeScreen:
         self.columns = columns
         self.cursor = types.SimpleNamespace(x=0, fg=7, bg=9, bold=True, italic=True)
         self.drawn = []
+        self.erased = []
+
+    def erase_in_line(self, mode, private):
+        self.erased.append((self.cursor.x, len(self.drawn)))
 
     def draw(self, text):
         self.drawn.append((text, self.cursor.x, self.cursor.fg, self.cursor.bg))
@@ -121,6 +125,10 @@ class TabBarTest(unittest.TestCase):
         tab = types.SimpleNamespace(title="x" * 50)
         tab_bar.draw_tab(draw_data, FakeScreen(30), tab, 12, 50, 2, True, types.SimpleNamespace(for_layout=False))
         self.assertEqual(_fade.calls[0][4], 50)
+
+    def test_gap_before_indicator_is_erased(self):
+        screen, ends = self.draw_bar(columns=40)
+        self.assertEqual(screen.erased, [(ends[-1], 4)])
 
     def test_fit_boundary(self):
         # Tabs leave the cursor at 8; one gap column precedes the text.
