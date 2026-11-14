@@ -24,6 +24,8 @@ from syswatch_refresh import install_refresh_timer  # noqa: E402
 
 _started = False
 _cache = None
+# Widest indicator text, the gap, and Kitty's trailing space after the last tab.
+RESERVE = len("CPU 100%  RAM 100%") + GAP_COLUMNS + 1
 
 
 def draw_tab(draw_data, screen, tab, before, max_tab_length, index, is_last, extra_data):
@@ -33,9 +35,13 @@ def draw_tab(draw_data, screen, tab, before, max_tab_length, index, is_last, ext
         install_refresh_timer(_cache)
         install_redraw_timer(_cache.view)
         _started = True
+    shown = is_last and not extra_data.for_layout and draw_data.tab_bar_edge in ("top", "bottom")
+    if shown:
+        # Kitty truncates a long title to this budget; the text keeps its columns.
+        max_tab_length = max(1, min(max_tab_length, screen.columns - RESERVE - before))
     # The extent stays Kitty's, so click targets and layout widths are unchanged.
     end = draw_tab_with_fade(draw_data, screen, tab, before, max_tab_length, index, is_last, extra_data)
-    if not is_last or extra_data.for_layout or draw_data.tab_bar_edge not in ("top", "bottom"):
+    if not shown:
         return end
     try:
         text = render(_cache.view())
