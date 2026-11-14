@@ -18,6 +18,8 @@ cargo run -p syswatch-cli -- top
 cargo run -p syswatch-cli -- suggestions
 cargo run -p syswatch-cli -- inspect 42-1700000000-memory
 cargo run -p syswatch-cli -- close 42-1700000000-memory   # needs an interactive terminal
+cargo run -p syswatch-cli -- update dismiss
+cargo run -p syswatch-cli -- --version
 ```
 
 The example prints one snapshot of aggregate CPU, physical memory, and the
@@ -53,6 +55,19 @@ only and never scans processes.
 `syswatch close <reference>` previews one finding and, only after you type `yes`, asks the
 daemon to request one SIGTERM. See [Requesting a graceful stop](#requesting-a-graceful-stop).
 
+`syswatch update dismiss` silences the current update notice. It prints
+`dismissed update notice for 1.2.3` and exits 0, or prints `no update to dismiss`
+and exits 0 when the daemon reports no newer release; that case writes nothing.
+A state path that cannot be resolved or written exits 1. See [Upgrade](#upgrade).
+
+`syswatch --version` prints the build version, for example `syswatch 0.1.0`, and
+exits 0. Every crate reads one workspace version, so the daemon banner, the
+protocol reply, and this output agree. `-V` and `version` are accepted too; any
+further argument exits 2.
+
+When the daemon has found a newer release, `syswatch status` adds one line:
+`update available: 1.2.3 - syswatch update dismiss to stop notices (https://…)`.
+
 ### Daemon socket
 
 The daemon socket path is `$SYSWATCH_SOCKET` when set to an absolute path,
@@ -66,11 +81,14 @@ request line per connection; the server closes the connection after its reply.
 
 This repository contains the telemetry crate, snapshot example, foreground
 daemon, and `syswatch status`, `syswatch top`, `syswatch suggestions`, `syswatch inspect`,
-and `syswatch close`
+`syswatch close`, `syswatch update dismiss`, and `syswatch --version`
 commands. `syswatch close` is the only command that can request a process action. The daemon evaluates advisory findings on process-sampling ticks,
 caches them separately from aggregate telemetry, and serves them through the
 read-only `suggestions` request. A Kitty tab bar shows CPU and RAM and a passive
-count of the current findings; it shows no finding details. A background
+count of the current findings; it shows no finding details. The daemon also
+checks once at startup and then once a day for a newer published release, and
+reports one in its status reply; it sends no signal and starts no process
+action. A background
 service is planned. See the
 [issue tracker](https://github.com/curedbylethe/watch-out-kitty/issues) for
 planned work and [issue #13](https://github.com/curedbylethe/watch-out-kitty/issues/13)
@@ -125,7 +143,11 @@ The suite cannot reach a real Kitty window. Run these checks in order, in a macO
     ```
 
     Check that the marker reads `!1`. When you finish, run `launchctl remove syswatch.test`. If `launchctl list syswatch.test` shows a non-zero `LastExitStatus`, the script stopped and printed nothing: run the `python3` line above in a terminal to see the error, then stop it with Ctrl-C. If `suggestions` still reports no finding after 5 minutes, record the item as failed with that output.
-12. Remove the integration by the [Removal](#removal) steps. After the Kitty restart the bar has its previous appearance.
+12. Start the daemon when a published release is newer than your build: the terminal prints one line, `syswatch-daemon: version 0.2.0 is available at https://…; set SYSWATCH_DISABLE_UPDATE_CHECK=1 to silence`, and the tab bar ends with one caret, for example `CPU 18%  RAM 42%  !2 ^`. No release exists yet, so record this item as pending the first tag.
+13. `cargo run -q -p syswatch-cli -- status` shows the same release on one line. Run `cargo run -q -p syswatch-cli -- update dismiss`: it prints `dismissed update notice for 0.2.0`. The next `status` shows no notice, and the caret leaves the tab bar within one sampling interval. Restart the daemon: both stay gone.
+14. Stop the daemon and start it with `SYSWATCH_DISABLE_UPDATE_CHECK=1`: the terminal prints nothing about a release, the tab bar never gains a caret, and `status` never carries the notice line.
+15. Disconnect the network and restart the daemon with the check enabled: no error line appears, and nothing retries before the next daily check.
+16. Remove the integration by the [Removal](#removal) steps. After the Kitty restart the bar has its previous appearance.
 
 Record each item as pass, fail, or skipped with the reason, with the Kitty and macOS versions, in the pull request. A failed item is a documentation change or a code bug; do not change the checklist to match a failure.
 
@@ -187,6 +209,8 @@ The tab bar adds a marker after the status text, two spaces apart: `CPU 18%  RAM
 | daemon unavailable | `syswatch offline` |
 
 `!N` is a current count. `!~N` is a retained count that is stale, so it is not a current count. `!?` means the advisory list has no current answer yet, for example while the daemon warms up. A fresh empty list shows no marker. The count never exceeds 64, the daemon's cap on the served list.
+
+A caret after the marker means the daemon found a newer release: `CPU 18%  RAM 42%  !2 ^`. It is one space after the advisory marker, or two spaces after the values when there is no marker. It needs a status reply, so it never appears beside `syswatch offline`. See [Upgrade](#upgrade).
 
 The marker is passive. It never opens a popup or notification, sends a signal, dismisses a finding, or runs `syswatch close`. It shows a count and a state only, never a process name, path, argument, explanation, or finding reference. No command in this tool dismisses a finding, so the marker changes only when the served list changes. The marker is not clickable; use the keyboard mappings below.
 
@@ -256,11 +280,54 @@ tab_bar_min_tabs 1
 
 Limits:
 
-- The last tab's title is shortened with Kitty's `…` to leave room for the widest text, including an advisory marker, plus one free column, and only when at least nine columns remain for the title. The indicator is hidden, never truncated, only when there is still no room, for example with many tabs.
+- The last tab's title is shortened with Kitty's `…` to leave room for the widest text, including an advisory marker and an update caret, plus one free column, and only when at least nine columns remain for the title. That widest text is `CPU ~100%  RAM ~100%  !~64 ^`, 28 characters, and the bar reserves 30 columns for it. The indicator is hidden, never truncated, only when there is still no room, for example with many tabs.
 - When tabs overflow the bar, the indicator is hidden.
 - `tab_bar_align` must stay `start` (the default); `center` and `end` shift the finished line and can clip the text.
 - The indicator is not clickable.
 - It uses the theme's inactive tab foreground on the inactive tab background, with no icon font.
+
+#### Upgrade
+
+Releases are tags of the form `vMAJOR.MINOR.PATCH`, for example `v0.2.0`. Pushing
+such a tag makes the release workflow create a GitHub release with notes generated
+from the merged changes. The release is the tag and its notes; no binary is
+attached, so you build from source.
+
+To upgrade:
+
+```sh
+git pull
+cargo build --workspace
+```
+
+Then stop the daemon with Ctrl-C and start it again. Kitty needs no restart
+unless the adapter files changed.
+
+The daemon reads the build version from one workspace value and reports it in
+`syswatch --version` and in its startup line. It checks once at startup and then
+once a day whether GitHub publishes a newer release. The check runs on its own
+thread and never delays sampling or a reply. It makes one bounded request with a
+3-second deadline, sends no machine identifier, and stays silent on every
+failure: offline, DNS failure, and rate limiting print nothing and are not
+retried before the next daily check. Set `SYSWATCH_DISABLE_UPDATE_CHECK=1` to
+stop the check entirely.
+
+A newer release appears in three places:
+
+- The daemon prints one line at the terminal:
+  `syswatch-daemon: version 0.2.0 is available at https://…; set SYSWATCH_DISABLE_UPDATE_CHECK=1 to silence`.
+- `syswatch status` adds one line naming the version and the release URL. The
+  line suggests `syswatch update dismiss`.
+- The tab bar ends with one caret: `CPU 18%  RAM 42% ^`, or
+  `CPU 18%  RAM 42%  !2 ^` beside an advisory badge. The caret is passive; it
+  opens nothing and sends no signal.
+
+Each version prompts at most once. `syswatch update dismiss` records the noticed
+version in a one-key file: `$SYSWATCH_UPDATE_STATE` when set to an absolute path,
+otherwise `$XDG_STATE_HOME/syswatch/update.json`, otherwise
+`~/.local/state/syswatch/update.json`. The file holds only the version. A
+dismissal survives a daemon restart and hides the notice until a newer release
+appears; then the notice returns. Remove the file to restore the notice.
 
 #### Existing tab_bar.py
 
@@ -289,7 +356,10 @@ Reverse the install in this order:
 3. Remove the three lines from `kitty.conf`.
 4. Restart Kitty. Removing the link while Kitty runs does not unload the bar until the restart.
 
-The adapter writes no files and keeps its view in memory; the daemon keeps its state in memory too. On a clean stop the daemon removes the socket file. Its directory stays; remove it if you want it gone.
+The adapter writes no files and keeps its view in memory; the daemon keeps its
+telemetry in memory too. Only `syswatch update dismiss` writes a file, the
+one-key dismissal named in [Upgrade](#upgrade); delete it to restore the notice.
+On a clean stop the daemon removes the socket file. Its directory stays; remove it if you want it gone.
 
 ## Project files
 
@@ -311,6 +381,7 @@ The adapter writes no files and keeps its view in memory; the daemon keeps its s
 | `crates/syswatch-core/src/action.rs` | Typed action service; requests one SIGTERM after a fresh allowed preflight |
 | `crates/syswatch-core/src/alerts.rs` | Alert eligibility policy with a fixed cooldown |
 | `crates/syswatch-core/src/protocol.rs` | Versioned protocol: monitoring requests are read-only; close requests are the only action requests |
+| `crates/syswatch-core/src/update.rs` | Release tag comparison and the one-key dismissal state file |
 | `crates/syswatch-core/examples/snapshot.rs` | One-time snapshot example |
 | `crates/syswatch-daemon` | Foreground monitoring daemon |
 | `crates/syswatch-daemon/src/action.rs` | Daemon close handler: preview and guarded confirmation from the latest scan |
@@ -323,6 +394,7 @@ The adapter writes no files and keeps its view in memory; the daemon keeps its s
 | `crates/syswatch-daemon/src/main.rs` | Foreground daemon entry point |
 | `crates/syswatch-daemon/src/sampler.rs` | Collector, process history, and advisory evaluation |
 | `crates/syswatch-daemon/src/signals.rs` | SIGINT and SIGTERM handling |
+| `crates/syswatch-daemon/src/update_check.rs` | Detached daily release check and its one-line prompt |
 | `crates/syswatch-daemon/tests` | End-to-end daemon and socket tests |
 | `crates/syswatch-cli` | Status, process-ranking, advisory-inspection, and confirmed-close command-line client |
 | `crates/syswatch-cli/src/args.rs` | Command-line argument parsing |
@@ -338,6 +410,7 @@ The adapter writes no files and keeps its view in memory; the daemon keeps its s
 | `kitty/syswatch_indicator.py` | Indicator and advisory-marker text from the cached view; pure, no I/O |
 | `kitty/test_*.py` | Python client tests (`unittest`) |
 | `.github/workflows/ci.yml` | Ubuntu checks: Rust formatting, Clippy, build and tests, and the Python suite |
+| `.github/workflows/release.yml` | Creates a GitHub release with generated notes from a `v*` tag |
 | `LICENSE` | Apache-2.0 license |
 
 ## Reading the measurements
@@ -514,6 +587,11 @@ The `suggestions` operation is additive, so the version remains `1`: existing
 fields and command behavior are unchanged, older servers reply
 `unsupported_command`, and older clients never send the request.
 
+A `status` reply also carries `build_version`, and `update` with `latest_version`
+and `url` when the daemon found a newer release. Both are additive: version `1`
+is unchanged, an older daemon omits them, and a reader that does not know them
+ignores them. The fields are informational. They never carry a process action.
+
 `syswatch inspect` reads the same cached reply and adds no request type; a finding reference is not a
 wire field and adds nothing to the reply. `syswatch close` adds two requests, `close_preview`
 and `close_confirm`. Each carries one complete `finding` object and nothing else. Monitoring
@@ -528,7 +606,8 @@ The three monitoring requests, the two close requests, and example replies:
 {"version":1,"command":"suggestions"}
 {"version":1,"command":"close_preview","finding":{"pid":42,"start_time_secs":1700000000,"kind":"memory"}}
 {"version":1,"command":"close_confirm","finding":{"pid":42,"start_time_secs":1700000000,"kind":"memory"}}
-{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":42.5,"cpu_updated_at_ms":1700000000123,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":2,"processes_updated_at_ms":1700000000100}
+{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":42.5,"cpu_updated_at_ms":1700000000123,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":2,"processes_updated_at_ms":1700000000100,"build_version":"0.1.0"}
+{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":42.5,"cpu_updated_at_ms":1700000000123,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":2,"processes_updated_at_ms":1700000000100,"build_version":"0.1.0","update":{"latest_version":"0.2.0","url":"https://github.com/curedbylethe/watch-out-kitty/releases/tag/v0.2.0"}}
 {"kind":"processes","version":1,"observed_at_ms":1700000000123,"processes_updated_at_ms":1700000000100,"processes":[{"pid":42,"parent_pid":1,"name":"worker","cpu_usage_percent":12.5,"memory_bytes":4096,"start_time_secs":1700000000}]}
 {"kind":"suggestions","version":1,"evaluated_at_ms":7,"processes_updated_at_ms":6,"findings":[]}
 {"kind":"close_preview","version":1,"assessment":{...},"process":{...}}
@@ -549,7 +628,7 @@ error before enough history is collected; `findings` is never `null`.
 `null` during warm-up. For example:
 
 ```text
-{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":0.0,"cpu_updated_at_ms":null,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":null,"processes_updated_at_ms":null}
+{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":0.0,"cpu_updated_at_ms":null,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":null,"processes_updated_at_ms":null,"build_version":"0.1.0"}
 ```
 
 | Error code | Meaning |
