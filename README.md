@@ -285,7 +285,7 @@ Kitty loads one `tab_bar.py` per config directory, and nothing is merged automat
 Reverse the install in this order:
 
 1. Stop the daemon: press Ctrl-C in its terminal.
-2. Remove the link, not the file it points to: `rm "${KITTY_CONFIG_DIRECTORY:-${XDG_CONFIG_HOME:-$HOME/.config}/kitty}/tab_bar.py"`. Run `ls -l` first; if the entry is a regular file, it is not this adapter, so leave it.
+2. Remove the link, not the file it points to, from the directory of the `kitty.conf` Kitty loads (see install step 2): `rm "<that directory>/tab_bar.py"`, with `~/.config/kitty` as the default. Run `ls -l` first; if the entry is a regular file, it is not this adapter, so leave it.
 3. Remove the three lines from `kitty.conf`.
 4. Restart Kitty. Removing the link while Kitty runs does not unload the bar until the restart.
 
