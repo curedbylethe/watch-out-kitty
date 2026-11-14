@@ -115,6 +115,13 @@ class TabBarTest(unittest.TestCase):
                 tab_bar.draw_tab(draw_data, FakeScreen(60), tab, 4, 50, 2, True, types.SimpleNamespace(for_layout=for_layout))
                 self.assertEqual(_fade.calls[0][4], budget)
 
+    def test_no_clamp_without_room_for_a_readable_title(self):
+        _fade.calls.clear()
+        draw_data = types.SimpleNamespace(tab_bar_edge="top", inactive_fg=FG, default_bg=BG, inactive_bg=BG)
+        tab = types.SimpleNamespace(title="x" * 50)
+        tab_bar.draw_tab(draw_data, FakeScreen(30), tab, 12, 50, 2, True, types.SimpleNamespace(for_layout=False))
+        self.assertEqual(_fade.calls[0][4], 50)
+
     def test_fit_boundary(self):
         # Tabs leave the cursor at 8; one gap column precedes the text.
         exact = 8 + 1 + len(LIVE)
