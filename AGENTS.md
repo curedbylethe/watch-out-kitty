@@ -79,8 +79,8 @@ suggestions, is never sent on the wire, and is replaced on the next such tick.
 A consumer that polls slower than the process tick misses intermediate events.
 
 The Kitty adapter caches `status` and `suggestions` in memory and refreshes
-them from one worker thread per Kitty process; drawing hooks only read the
-immutable cached view. The redraw timer is an isolated capability-checked shim,
+them from a main-loop timer chain with nonblocking socket requests and no Python
+threads; drawing hooks only read the immutable cached view. The redraw timer is an isolated capability-checked shim,
 and without it updates occur only on Kitty-driven redraws.
 
 ## Process lifecycle policy
