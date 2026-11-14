@@ -9,9 +9,10 @@ from syswatch_client import TransportError, read_status, read_suggestions
 
 SOCKET = "/s.sock"
 NOW = 2_000
+ABSENT = object()  # distinguishes an absent field from an explicit null
 
 
-def status_body(**overrides):
+def status_body(update=ABSENT, **overrides):
     body = {
         "kind": "status",
         "version": 1,
@@ -24,6 +25,8 @@ def status_body(**overrides):
         "process_count": 3,
         "processes_updated_at_ms": 950,
     }
+    if update is not ABSENT:
+        body["update"] = update
     body.update(overrides)
     return body
 
@@ -83,6 +86,25 @@ class StatusDecodingTests(unittest.TestCase):
         self.assertIsNone(status.cpu_updated_at_ms)
         self.assertIsNone(status.process_count)
         self.assertIsNone(status.processes_updated_at_ms)
+
+    def test_update_notice_decodes(self):
+        body = status_body(update={"latest_version": "1.2.3", "url": "https://example.invalid/kitty"})
+        self.assertEqual(run(body).value.update, client.Update("1.2.3", "https://example.invalid/kitty"))
+
+    def test_absent_update_is_none(self):
+        self.assertIsNone(run(status_body()).value.update)
+
+    def test_null_update_is_none(self):
+        self.assertIsNone(run(status_body(update=None)).value.update)
+
+    def test_malformed_update_is_none_without_rejecting_the_reply(self):
+        cases = ["1.2.3", [], {}, {"latest_version": "1.2.3"}, {"url": "https://example.invalid"}, 7]
+        cases.append({"latest_version": 1, "url": "https://example.invalid"})
+        for update in cases:
+            with self.subTest(update=update):
+                result = run(status_body(update=update))
+                self.assertEqual(result.state, "available")
+                self.assertIsNone(result.value.update)
 
     def test_missing_memory_total_is_malformed(self):
         body = status_body()

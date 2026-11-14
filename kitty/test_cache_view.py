@@ -5,7 +5,7 @@ import sys
 import unittest
 
 from syswatch_cache import TelemetryCache
-from syswatch_client import ClientResult, Memory, Status, Suggestions
+from syswatch_client import ClientResult, Memory, Status, Suggestions, Update
 
 WALL_MS = 1_700_000_000_000
 STATUS = Status(
@@ -17,6 +17,7 @@ STATUS = Status(
     processes_updated_at_ms=WALL_MS,
 )
 OTHER_STATUS = dataclasses.replace(STATUS, cpu_usage_percent=2.5)
+NOTICED_STATUS = dataclasses.replace(STATUS, update=Update("1.2.3", "https://example.invalid"))
 SUGGESTIONS = Suggestions(evaluated_at_ms=WALL_MS, processes_updated_at_ms=WALL_MS, findings=())
 
 
@@ -67,6 +68,13 @@ class CacheViewTest(unittest.TestCase):
         self.cache._ingest("status", ClientResult("available", value=STATUS, age_ms=0), 0)
         revision = self.cache.view().revision
         self.cache._ingest("status", ClientResult("available", value=OTHER_STATUS, age_ms=0), 0)
+        self.assertEqual(self.cache.view().revision, revision + 1)
+
+    def test_update_notice_alone_bumps_revision(self):
+        # Proof the redraw key needs no notice field: the revision already moves between replies.
+        self.cache._ingest("status", ClientResult("available", value=STATUS, age_ms=0), 0)
+        revision = self.cache.view().revision
+        self.cache._ingest("status", ClientResult("available", value=NOTICED_STATUS, age_ms=0), 0)
         self.assertEqual(self.cache.view().revision, revision + 1)
 
     def test_failure_after_success_keeps_last_value_and_ages(self):
