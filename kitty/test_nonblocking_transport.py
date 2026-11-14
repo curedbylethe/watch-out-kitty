@@ -174,6 +174,16 @@ class SourceGuardTest(unittest.TestCase):
         for banned in ("sendall(", "settimeout(", "select.", "poll(", ".connect(", "sleep(", "threading"):
             self.assertNotIn(banned, source)
 
+    def test_refresh_driver_imports_no_kitty_at_load(self):
+        tree = ast.parse(self.source("syswatch_refresh.py"))
+        top = {
+            node.module.split(".")[0] if isinstance(node, ast.ImportFrom) else alias.name.split(".")[0]
+            for node in tree.body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in (node.names if isinstance(node, ast.Import) else [None])
+        }
+        self.assertFalse(top & {"kitty", "threading", "socket"})
+
 
 if __name__ == "__main__":
     unittest.main()
