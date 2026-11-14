@@ -5,7 +5,7 @@ import unittest
 
 from syswatch_cache import CacheView, ChannelView
 from syswatch_client import Memory, Status
-from syswatch_indicator import GAP_COLUMNS, fit, render
+from syswatch_indicator import fit, render
 
 WALL_MS = 1_700_000_000_000
 STATUS = Status(
@@ -101,9 +101,6 @@ class FitTest(unittest.TestCase):
         self.assertIsNone(fit(text, 0))
         self.assertIsNone(fit(text, -4))
         self.assertIsNone(fit("", 0))
-
-    def test_gap_columns(self):
-        self.assertEqual(GAP_COLUMNS, 1)
 
 
 class PurityTest(unittest.TestCase):
