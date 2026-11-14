@@ -15,6 +15,7 @@ pub mod protocol;
 pub mod provenance;
 pub mod report;
 pub mod snapshot;
+pub mod update;
 #[cfg(unix)]
 pub use action::UnixSignalSender;
 pub use action::{
@@ -38,6 +39,10 @@ pub use preflight::{
     PreflightRequest, RequestedAction,
 };
 pub use snapshot::{AggregateSnapshot, MemorySnapshot, ProcessSnapshot, SystemSnapshot};
+pub use update::{
+    CommandRunner, CurlRunner, Release, StatePathError, UPDATE_FEED_URL, Version, check, disabled,
+    load_state, parse_tag, save_state, state_path,
+};
 
 #[cfg(test)]
 mod tests {
