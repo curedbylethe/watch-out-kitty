@@ -124,7 +124,7 @@ The suite cannot reach a real Kitty window. Run these checks in order, in a macO
     cargo run -q -p syswatch-cli -- suggestions   # expect a memory finding for Python
     ```
 
-    Check that the marker reads `!1`. When you finish, run `launchctl remove syswatch.test`. If `suggestions` still reports no finding after 5 minutes, record the item as failed with that output.
+    Check that the marker reads `!1`. When you finish, run `launchctl remove syswatch.test`. If `launchctl list syswatch.test` shows a non-zero `LastExitStatus`, the script stopped and printed nothing: run the `python3` line above in a terminal to see the error, then stop it with Ctrl-C. If `suggestions` still reports no finding after 5 minutes, record the item as failed with that output.
 12. Remove the integration by the [Removal](#removal) steps. After the Kitty restart the bar has its previous appearance.
 
 Record each item as pass, fail, or skipped with the reason, with the Kitty and macOS versions, in the pull request. A failed item is a documentation change or a code bug; do not change the checklist to match a failure.
