@@ -49,6 +49,10 @@ def draw_tab(draw_data, screen, tab, before, max_tab_length, index, is_last, ext
         if text is not None:
             text = fit(text, screen.columns - max(end, screen.cursor.x) - GAP_COLUMNS)
         if text is not None:
+            # A long title can draw past its reported end; blank that overflow first.
+            screen.cursor.x = end
+            screen.cursor.bg = as_rgb(int(draw_data.default_bg))
+            screen.erase_in_line(0, False)
             screen.cursor.bold = screen.cursor.italic = False
             screen.cursor.fg = as_rgb(int(draw_data.inactive_fg))
             screen.cursor.bg = as_rgb(int(draw_data.inactive_bg))
