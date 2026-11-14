@@ -114,7 +114,8 @@ The suite cannot reach a real Kitty window. Run these checks in order, in a macO
     size = 300 * 1024 * 1024
     m = mmap.mmap(-1, size)
     addr = ctypes.addressof(ctypes.c_char.from_buffer(m))
-    ctypes.CDLL(None).mlock(ctypes.c_void_p(addr), ctypes.c_size_t(size))
+    if ctypes.CDLL(None).mlock(ctypes.c_void_p(addr), ctypes.c_size_t(size)) != 0:
+        raise SystemExit("mlock failed")
     for i in range(0, size, 4096):
         m[i] = 1
     time.sleep(3600)
