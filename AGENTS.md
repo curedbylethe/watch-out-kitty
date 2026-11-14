@@ -36,6 +36,12 @@ Add or update relevant tests for behavior changes. CI runs formatting, Clippy,
 tests, and the Python client suite (Python 3.15) on Ubuntu 24.04; it does not
 run a separate build job.
 
+One version governs the workspace: the `[workspace.package] version` in the root
+manifest, which every crate inherits. `syswatch --version` and the daemon startup
+line both read it, so a release changes one value. Releases are tags of the form
+`vMAJOR.MINOR.PATCH`; pushing one makes `.github/workflows/release.yml` create a
+GitHub release with generated notes. That workflow is the only publisher.
+
 The Python suite is part of the gate. It runs headless and must stay standard
 library only. It must not require Kitty, a display, a running daemon, the
 user's socket path, or network access; use fakes and temporary sockets. Behavior
@@ -90,6 +96,19 @@ them from a main-loop timer chain with nonblocking socket requests and no Python
 threads; drawing hooks only read the immutable cached view. The redraw timer is an isolated capability-checked shim,
 and without it updates occur only on Kitty-driven redraws.
 
+The daemon also checks, once at startup and then once every 24 hours, whether a
+newer release is published. The check runs on its own detached thread with a
+3-second bound, never on the sampling path, the reply path, or the Kitty redraw
+timer chain, and it never blocks the main loop. Every failure is silent: no
+output, no retry before the next interval. The request carries a fixed user agent
+and the release feed URL, nothing about the machine, and sends no telemetry.
+`status` reports the result as the additive optional `update` field, and the
+adapter shows one caret. Dismissal is a one-key file owned by the core, written by
+`syswatch update dismiss` and re-read once per process tick; the daemon holds it
+in memory otherwise. A dismissal hides the notice until a newer release appears.
+`SYSWATCH_DISABLE_UPDATE_CHECK` turns the check off. The check requests no process
+action and never authorizes one.
+
 ## Process lifecycle policy
 
 The crate does not detect stale processes and never forces termination. It requests a signal only through the action service, and only for one explicitly confirmed finding identity. Advisory findings never request one. Any future
@@ -116,8 +135,10 @@ escalation, force, sudo, bulk actions, and advisor-triggered actions. Admission
 by preflight is not permission for any of them.
 
 `syswatch close` is the only command that may lead to a signal. It requires an interactive terminal
-and an exact `yes` at the prompt. Background sampling, advisory findings, and Kitty rendering stay
-read-only. A requested signal is not an exit: report it as a request, never as a confirmed exit.
+and an exact `yes` at the prompt. Background sampling, advisory findings, the release check, and
+Kitty rendering stay read-only; the release check makes the one documented outbound request and
+nothing else leaves the machine. A requested signal is not an exit: report it as a request, never as
+a confirmed exit.
 
 ## Change discipline
 
