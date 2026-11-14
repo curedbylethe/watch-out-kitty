@@ -63,14 +63,20 @@ class TransportError(Exception):
         self.reason = reason
 
 
-def request_line(socket_path, command, timeout_ms=DEFAULT_TIMEOUT_MS):
-    """Send one read-only request and return the reply body, without its terminator."""
+def request_bytes(command):
+    """Return one framed read-only request, terminator included."""
     if not isinstance(command, str) or command not in READ_COMMANDS:
         raise ValueError(f"unsupported command: {command!r}")
-    if timeout_ms <= 0:
-        raise ValueError("timeout_ms must be positive")
     line = json.dumps({"version": PROTOCOL_VERSION, "command": command}, separators=(",", ":")).encode() + b"\n"
     assert len(line) <= MAX_REQUEST_BYTES
+    return line
+
+
+def request_line(socket_path, command, timeout_ms=DEFAULT_TIMEOUT_MS):
+    """Send one read-only request and return the reply body, without its terminator."""
+    line = request_bytes(command)
+    if timeout_ms <= 0:
+        raise ValueError("timeout_ms must be positive")
 
     timeout = timeout_ms / 1000
     deadline = time.monotonic() + timeout  # one deadline for the whole reply
@@ -310,6 +316,12 @@ def _decode_reply(body, command, decode, now_ms, max_age_ms):
     age = timestamp_age_ms(now_ms, primary_ms)
     stale = max_age_ms is not None and age > max_age_ms
     return ClientResult("stale" if stale else "available", value=value, age_ms=age)
+
+
+def decode_reply(command, body, now_ms, max_age_ms):
+    """Validate one reply body for `command` and return a ClientResult; never raises."""
+    decode = _status if command == "status" else _suggestions
+    return _decode_reply(body, command, decode, now_ms, max_age_ms)
 
 
 def _read(command, decode, socket_path, timeout_ms, now_ms, max_age_ms):
