@@ -231,7 +231,7 @@ Steps:
    cargo build --workspace
    ```
 
-2. Link the adapter as `tab_bar.py` in your Kitty config directory. The directory is `$KITTY_CONFIG_DIRECTORY` when set, otherwise `$XDG_CONFIG_HOME/kitty`, otherwise `~/.config/kitty`. Kitty reads these variables; the adapter does not.
+2. Link the adapter as `tab_bar.py` into the directory that holds the `kitty.conf` Kitty loads. Kitty uses `$KITTY_CONFIG_DIRECTORY` when set; otherwise it uses the first existing file of `$XDG_CONFIG_HOME/kitty/kitty.conf`, `~/.config/kitty/kitty.conf`, `~/Library/Preferences/kitty/kitty.conf` and `$XDG_CONFIG_DIRS/kitty/kitty.conf`. The command below assumes `~/.config/kitty`; if your loaded `kitty.conf` is elsewhere, use that directory. Kitty's `edit_config_file` action shows the path. Kitty reads these variables; the adapter does not.
 
    ```sh
    ln -s "$PWD/kitty/tab_bar.py" "${KITTY_CONFIG_DIRECTORY:-${XDG_CONFIG_HOME:-$HOME/.config}/kitty}/tab_bar.py"
