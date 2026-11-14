@@ -149,7 +149,7 @@ tab_bar_min_tabs 1
 
 Limits:
 
-- The last tab's title is shortened with Kitty's `…` to leave room for the text plus one free column. The indicator is hidden, never truncated, only when there is still no room, for example with many tabs.
+- The last tab's title is shortened with Kitty's `…` to leave room for the text plus one free column, and only when at least nine columns remain for the title. The indicator is hidden, never truncated, only when there is still no room, for example with many tabs.
 - When tabs overflow the bar, the indicator is hidden.
 - `tab_bar_align` must stay `start` (the default); `center` and `end` shift the finished line and can clip the text.
 - The indicator is not clickable.
