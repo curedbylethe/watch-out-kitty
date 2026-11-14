@@ -35,7 +35,6 @@ BACKOFF_MAX_MS = 10000
 
 LIVE_STATES = ("available", "stale")
 FLOORS = {"status": MIN_STATUS_INTERVAL_MS, "suggestions": MIN_SUGGESTIONS_INTERVAL_MS}
-COMMANDS = {"status": "status", "suggestions": "suggestions"}
 
 
 @dataclass(frozen=True)
@@ -149,7 +148,7 @@ class TelemetryCache:
             if channel is None:
                 return max(0, min(self._due.values()) - mono_ms)
             request = self._request_factory(
-                COMMANDS[channel],
+                channel,
                 self._socket_path,
                 mono_ms + self._deadline_ms,
                 self._now_ms,
