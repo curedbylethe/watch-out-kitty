@@ -101,12 +101,29 @@ The suite cannot reach a real Kitty window. Run these checks in order, in a macO
 3. Ten or more tabs: every title is readable and none is overwritten. The indicator is at the right edge or hidden, as the limits in [Kitty tab bar](#kitty-tab-bar) describe.
 4. Narrow the window until the indicator disappears: the tabs still draw. Widen it: the indicator returns.
 5. `tab_bar_edge top`, then `bottom`: the indicator is present on both. `left` or `right`: the tabs draw and no indicator appears.
-6. Switch between the dark and light macOS appearance: the text stays readable in both, with no fixed color.
+6. Kitty does not follow the macOS appearance unless `kitty.conf` says so, so switch Kitty's own theme: run `kitty +kitten themes`, choose a dark theme, restart Kitty, then choose a light theme and restart again. The text stays readable in both, with no fixed color.
 7. No daemon running: the indicator shows `syswatch offline`.
 8. Start `syswatch-daemon`: the indicator shows `CPU --  RAM --`, then numbers. `cargo run -q -p syswatch-cli -- status` shows the same values.
 9. Leave one window idle for several minutes: the numbers keep changing. If they change only when you interact, record that as the repaint fallback. [Issue #80](https://github.com/curedbylethe/watch-out-kitty/issues/80) tracks this check; run it here once and do not file a duplicate.
 10. Stop the daemon while Kitty runs: the indicator shows `syswatch offline` without a restart. Start the daemon again: the numbers return.
-11. With a current finding, the marker shows `!N`. After the finding clears, the marker disappears. With the daemon down, no marker appears beside `syswatch offline`.
+11. With a current finding, the marker shows `!N`. After the finding clears, the marker disappears. With the daemon down, no marker appears beside `syswatch offline`. A finding needs a process that holds at least 256 MiB, uses at most 1% CPU, and is not started from a terminal, so `yes > /dev/null` never produces one. Start a process from launchd that holds memory and sleeps, and wait about 2–3 minutes:
+
+    ```sh
+    cat > /tmp/syswatch-hold.py <<'EOF'
+    import ctypes, mmap, time
+    size = 300 * 1024 * 1024
+    m = mmap.mmap(-1, size)
+    addr = ctypes.addressof(ctypes.c_char.from_buffer(m))
+    ctypes.CDLL(None).mlock(ctypes.c_void_p(addr), ctypes.c_size_t(size))
+    for i in range(0, size, 4096):
+        m[i] = 1
+    time.sleep(3600)
+    EOF
+    launchctl submit -l syswatch.test -- python3 /tmp/syswatch-hold.py
+    cargo run -q -p syswatch-cli -- suggestions   # expect a memory finding for Python
+    ```
+
+    Check that the marker reads `!1`. When you finish, run `launchctl remove syswatch.test`. If `suggestions` still reports no finding after 5 minutes, record the item as failed with that output.
 12. Remove the integration by the [Removal](#removal) steps. After the Kitty restart the bar has its previous appearance.
 
 Record each item as pass, fail, or skipped with the reason, with the Kitty and macOS versions, in the pull request. A failed item is a documentation change or a code bug; do not change the checklist to match a failure.
