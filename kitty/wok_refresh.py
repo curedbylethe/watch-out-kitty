@@ -24,7 +24,7 @@ def report_error(where, exc):
         return
     _reported.add(key)
     try:
-        print(f"syswatch: {where}: {type(exc).__name__}: {exc}", file=sys.stderr)
+        print(f"wok: {where}: {type(exc).__name__}: {exc}", file=sys.stderr)
     except Exception:  # a closed stderr must not break the timer chain
         pass
 

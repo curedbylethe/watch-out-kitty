@@ -1,4 +1,4 @@
-"""Tab-bar indicator text for the syswatch Kitty adapter's cached view.
+"""Tab-bar indicator text for the wok Kitty adapter's cached view.
 
 Pure and read-only: it formats the cached `status` channel and the advisory
 `suggestions` count into a short ASCII string. It imports nothing from Kitty,
@@ -65,7 +65,7 @@ def render(view) -> str | None:
     if status.state in ("not_refreshed", "warming_up"):
         return _decorate(PLACEHOLDER, view)
     if status.state in OFFLINE_STATES:
-        return "syswatch offline"
+        return "wok offline"
     if status.state not in ("available", "stale") or status.value is None:
         return None
     value = status.value

@@ -5,8 +5,8 @@ import types
 import unittest
 from unittest import mock
 
-from syswatch_cache import TelemetryCache
-from syswatch_client import ClientResult, Evidence, Finding, Memory, Status, Suggestions
+from wok_cache import TelemetryCache
+from wok_client import ClientResult, Evidence, Finding, Memory, Status, Suggestions
 
 
 def _as_rgb(color):

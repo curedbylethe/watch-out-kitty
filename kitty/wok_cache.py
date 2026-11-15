@@ -6,7 +6,7 @@ attribute assignment. Only the caller that drives `advance()` writes, so
 no lock is needed.
 
 `advance(mono_ms)` is driven from Kitty's main-loop timer (see
-`syswatch_refresh`). It starts at most one nonblocking request, advances it by
+`wok_refresh`). It starts at most one nonblocking request, advances it by
 one step, and returns the delay until the next useful call. The cache creates
 no threads and never blocks.
 
@@ -20,8 +20,8 @@ previous one completes, so a slow daemon cannot cause a catch-up burst.
 import time
 from dataclasses import dataclass, replace
 
-from syswatch_client import ClientResult
-from syswatch_transport import NonblockingRequest
+from wok_client import ClientResult
+from wok_transport import NonblockingRequest
 
 DEFAULT_STATUS_INTERVAL_MS = 1000
 DEFAULT_SUGGESTIONS_INTERVAL_MS = 5000

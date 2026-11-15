@@ -1,4 +1,4 @@
-"""Nonblocking one-request state machine for the syswatch Unix socket.
+"""Nonblocking one-request state machine for the wok Unix socket.
 
 `NonblockingRequest.advance(mono_ms)` makes whatever progress the socket allows
 and returns at once. It never waits for readiness, so it is safe to call from
@@ -9,7 +9,7 @@ one absolute deadline, not a timeout restarted per read.
 import errno
 import socket
 
-from syswatch_client import (
+from wok_client import (
     MAX_RESPONSE_BYTES,
     READ_CHUNK_BYTES,
     ClientResult,

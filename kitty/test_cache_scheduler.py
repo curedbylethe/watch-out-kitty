@@ -2,10 +2,10 @@ import io
 import unittest
 from contextlib import redirect_stderr
 
-import syswatch_refresh
+import wok_refresh
 from unittest import mock
-from syswatch_cache import PROGRESS_MS, TelemetryCache
-from syswatch_client import ClientResult, Memory, Status
+from wok_cache import PROGRESS_MS, TelemetryCache
+from wok_client import ClientResult, Memory, Status
 
 WALL_MS = 1_700_000_000_000
 STATUS = Status(
@@ -140,8 +140,8 @@ class SchedulerTest(unittest.TestCase):
 
 class RefreshDriverTest(unittest.TestCase):
     def setUp(self):
-        syswatch_refresh._cache = None
-        syswatch_refresh._reported.clear()
+        wok_refresh._cache = None
+        wok_refresh._reported.clear()
         quiet = mock.patch("sys.stderr", io.StringIO())  # expected errors stay out of test output
         quiet.start()
         self.addCleanup(quiet.stop)
@@ -157,33 +157,33 @@ class RefreshDriverTest(unittest.TestCase):
         self.timers[-1][0](0)
 
     def test_install_schedules_a_one_shot_and_advances_on_fire(self):
-        self.assertTrue(syswatch_refresh.install_refresh_timer(self.cache, add_timer=self.add_timer))
+        self.assertTrue(wok_refresh.install_refresh_timer(self.cache, add_timer=self.add_timer))
         self.assertEqual(self.timers[0][1:], (0.0, False))
         self.fire()
         self.cache.advance.assert_called_once()
         self.assertEqual(self.timers[-1][1:], (1.0, False))
 
     def test_second_install_adds_no_timer(self):
-        syswatch_refresh.install_refresh_timer(self.cache, add_timer=self.add_timer)
-        self.assertTrue(syswatch_refresh.install_refresh_timer(mock.Mock(), add_timer=self.add_timer))
+        wok_refresh.install_refresh_timer(self.cache, add_timer=self.add_timer)
+        self.assertTrue(wok_refresh.install_refresh_timer(mock.Mock(), add_timer=self.add_timer))
         self.assertEqual(len(self.timers), 1)
 
     def test_stop_makes_a_queued_timer_do_nothing(self):
-        syswatch_refresh.install_refresh_timer(self.cache, add_timer=self.add_timer)
-        syswatch_refresh.stop_refresh_timer()
+        wok_refresh.install_refresh_timer(self.cache, add_timer=self.add_timer)
+        wok_refresh.stop_refresh_timer()
         self.fire()
         self.cache.advance.assert_not_called()
         self.cache.close.assert_called()
 
     def test_advance_exception_closes_request_and_retries_later(self):
-        syswatch_refresh.install_refresh_timer(self.cache, add_timer=self.add_timer)
+        wok_refresh.install_refresh_timer(self.cache, add_timer=self.add_timer)
         self.cache.advance.side_effect = RuntimeError("bug")
         self.fire()
         self.cache.close.assert_called()
         self.assertEqual(self.timers[-1][1], 1.0)
 
     def test_advance_error_is_printed_once_per_distinct_error(self):
-        syswatch_refresh.install_refresh_timer(self.cache, add_timer=self.add_timer)
+        wok_refresh.install_refresh_timer(self.cache, add_timer=self.add_timer)
         self.cache.advance.side_effect = RuntimeError("bug")
         err = io.StringIO()
         with redirect_stderr(err):
@@ -193,19 +193,19 @@ class RefreshDriverTest(unittest.TestCase):
             self.fire()
         self.assertEqual(
             err.getvalue().splitlines(),
-            ["syswatch: refresh: RuntimeError: bug", "syswatch: refresh: ValueError: other"],
+            ["wok: refresh: RuntimeError: bug", "wok: refresh: ValueError: other"],
         )
 
     def test_reported_errors_are_bounded(self):
         err = io.StringIO()
         with redirect_stderr(err):
-            for i in range(syswatch_refresh.MAX_REPORTED_ERRORS + 10):
-                syswatch_refresh.report_error("refresh", RuntimeError(str(i)))
-        self.assertEqual(len(err.getvalue().splitlines()), syswatch_refresh.MAX_REPORTED_ERRORS)
+            for i in range(wok_refresh.MAX_REPORTED_ERRORS + 10):
+                wok_refresh.report_error("refresh", RuntimeError(str(i)))
+        self.assertEqual(len(err.getvalue().splitlines()), wok_refresh.MAX_REPORTED_ERRORS)
 
     def test_missing_kitty_timer_returns_false(self):
-        self.assertFalse(syswatch_refresh.install_refresh_timer(self.cache))
-        self.assertIsNone(syswatch_refresh._cache)
+        self.assertFalse(wok_refresh.install_refresh_timer(self.cache))
+        self.assertIsNone(wok_refresh._cache)
 
 
 if __name__ == "__main__":

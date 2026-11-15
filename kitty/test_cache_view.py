@@ -4,8 +4,8 @@ import pathlib
 import sys
 import unittest
 
-from syswatch_cache import TelemetryCache
-from syswatch_client import ClientResult, Memory, Status, Suggestions, Update
+from wok_cache import TelemetryCache
+from wok_client import ClientResult, Memory, Status, Suggestions, Update
 
 WALL_MS = 1_700_000_000_000
 STATUS = Status(
@@ -136,7 +136,7 @@ class CacheViewTest(unittest.TestCase):
             view.status.state = "available"
 
     def test_module_imports_only_allowed_modules(self):
-        path = pathlib.Path(__file__).with_name("syswatch_cache.py")
+        path = pathlib.Path(__file__).with_name("wok_cache.py")
         names = set()
         for node in ast.walk(ast.parse(path.read_text())):
             if isinstance(node, ast.Import):
@@ -144,7 +144,7 @@ class CacheViewTest(unittest.TestCase):
             elif isinstance(node, ast.ImportFrom) and node.level == 0:
                 names.add(node.module.split(".")[0])
         self.assertFalse(names & {"kitty", "socket", "subprocess", "asyncio"})
-        self.assertLessEqual(names, set(sys.stdlib_module_names) | {"syswatch_client", "syswatch_transport"})
+        self.assertLessEqual(names, set(sys.stdlib_module_names) | {"wok_client", "wok_transport"})
 
 
 if __name__ == "__main__":

@@ -9,8 +9,8 @@ import time
 import unittest
 from unittest import mock
 
-import syswatch_transport
-from syswatch_transport import NonblockingRequest
+import wok_transport
+from wok_transport import NonblockingRequest
 from test_responses import status_body
 
 NOW = 2_000
@@ -141,7 +141,7 @@ class NonblockingRequestTest(unittest.TestCase):
 
     def test_reply_over_the_size_limit_is_malformed(self):
         req = request(self.daemon.path)
-        with mock.patch.object(syswatch_transport, "MAX_RESPONSE_BYTES", 16):
+        with mock.patch.object(wok_transport, "MAX_RESPONSE_BYTES", 16):
             drive(req, self.daemon, steps=5)
             self.daemon.accept()
             self.daemon.received_line()
@@ -171,12 +171,12 @@ class SourceGuardTest(unittest.TestCase):
         return pathlib.Path(__file__).with_name(name).read_text()
 
     def test_transport_has_no_blocking_socket_calls(self):
-        source = self.source("syswatch_transport.py")
+        source = self.source("wok_transport.py")
         for banned in ("sendall(", "settimeout(", "select.", "poll(", ".connect(", "sleep(", "threading"):
             self.assertNotIn(banned, source)
 
     def test_refresh_driver_imports_no_kitty_at_load(self):
-        tree = ast.parse(self.source("syswatch_refresh.py"))
+        tree = ast.parse(self.source("wok_refresh.py"))
         top = {
             node.module.split(".")[0] if isinstance(node, ast.ImportFrom) else alias.name.split(".")[0]
             for node in tree.body

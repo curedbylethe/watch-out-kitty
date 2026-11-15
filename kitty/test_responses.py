@@ -4,8 +4,8 @@ import os
 import unittest
 from unittest.mock import patch
 
-import syswatch_client as client
-from syswatch_client import TransportError, read_status, read_suggestions
+import wok_client as client
+from wok_client import TransportError, read_status, read_suggestions
 
 SOCKET = "/s.sock"
 NOW = 2_000
@@ -63,7 +63,7 @@ def finding(**overrides):
 def run(reply, read=read_status, **kwargs):
     """Decode `reply` (a dict, or raw bytes) as the daemon's answer to `read`."""
     body = reply if isinstance(reply, bytes) else json.dumps(reply).encode()
-    with patch("syswatch_client.request_line", return_value=body):
+    with patch("wok_client.request_line", return_value=body):
         return read(SOCKET, now_ms=kwargs.pop("now_ms", NOW), **kwargs)
 
 
@@ -210,7 +210,7 @@ class FreshnessTests(unittest.TestCase):
         self.assertEqual(result.age_ms, 100)
 
     def test_negative_max_age_raises_before_connecting(self):
-        with patch("syswatch_client.request_line") as request:
+        with patch("wok_client.request_line") as request:
             with self.assertRaises(ValueError):
                 read_status(SOCKET, max_age_ms=-1)
             request.assert_not_called()
@@ -220,13 +220,13 @@ class TransportMappingTests(unittest.TestCase):
     def test_transport_reasons_map_to_states(self):
         for reason in ("timeout", "permission_denied", "daemon_unavailable"):
             with self.subTest(reason=reason), patch(
-                "syswatch_client.request_line", side_effect=TransportError(reason)
+                "wok_client.request_line", side_effect=TransportError(reason)
             ):
                 self.assertEqual(read_status(SOCKET).state, reason)
 
     def test_relative_socket_env_is_socket_path_invalid(self):
         with patch.dict(os.environ, {"SYSWATCH_SOCKET": "rel.sock"}, clear=True), patch(
-            "syswatch_client.request_line"
+            "wok_client.request_line"
         ) as request:
             result = read_status()
             request.assert_not_called()

@@ -1,4 +1,4 @@
-"""Read-only client for the syswatch daemon's cached status and suggestions.
+"""Read-only client for the wok daemon's cached status and suggestions.
 
 Requires Python 3.11 or newer. Standard library only. Read-only: it sends
 `status` and `suggestions` requests over the local Unix socket. It never opens

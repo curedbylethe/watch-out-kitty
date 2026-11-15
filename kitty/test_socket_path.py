@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from syswatch_client import SocketPathError, resolve_socket_path
+from wok_client import SocketPathError, resolve_socket_path
 
 
 def resolve(**env):

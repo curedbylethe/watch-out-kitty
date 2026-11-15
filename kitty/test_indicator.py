@@ -4,9 +4,9 @@ import pathlib
 import types
 import unittest
 
-from syswatch_cache import CacheView, ChannelView, TelemetryCache
-from syswatch_client import ClientResult, Evidence, Finding, Memory, Status, Suggestions, Update, read_suggestions
-from syswatch_indicator import MAX_INDICATOR_TEXT, fit, render
+from wok_cache import CacheView, ChannelView, TelemetryCache
+from wok_client import ClientResult, Evidence, Finding, Memory, Status, Suggestions, Update, read_suggestions
+from wok_indicator import MAX_INDICATOR_TEXT, fit, render
 from test_responses import finding as wire_finding
 from test_responses import run, suggestions_body
 
@@ -76,7 +76,7 @@ class RenderTest(unittest.TestCase):
     def test_offline_states(self):
         for state in OFFLINE:
             with self.subTest(state=state):
-                self.assertEqual(render(view(state)), "syswatch offline")
+                self.assertEqual(render(view(state)), "wok offline")
 
     def test_available_rows(self):
         cases = [
@@ -148,7 +148,7 @@ class RenderTest(unittest.TestCase):
     def test_offline_status_has_no_badge(self):
         for state in OFFLINE:
             with self.subTest(state=state):
-                self.assertEqual(render(view(state, None, fresh(2))), "syswatch offline")
+                self.assertEqual(render(view(state, None, fresh(2))), "wok offline")
         self.assertIsNone(render(view("bogus", status(), fresh(2))))
 
     def test_worst_case_is_the_reserved_text(self):
@@ -178,7 +178,7 @@ class RenderTest(unittest.TestCase):
 
     def test_marker_needs_a_status_value(self):
         self.assertEqual(render(view("not_refreshed")), "CPU --  RAM --")
-        self.assertEqual(render(view("timeout")), "syswatch offline")
+        self.assertEqual(render(view("timeout")), "wok offline")
 
     def test_marker_tolerates_a_value_without_the_field(self):
         value = types.SimpleNamespace(cpu_updated_at_ms=WALL_MS, cpu_usage_percent=18.0, memory=Memory(100, 42))
@@ -230,7 +230,7 @@ class FitTest(unittest.TestCase):
 
 class PurityTest(unittest.TestCase):
     def test_module_has_no_kitty_import_or_io(self):
-        path = pathlib.Path(__file__).with_name("syswatch_indicator.py")
+        path = pathlib.Path(__file__).with_name("wok_indicator.py")
         tree = ast.parse(path.read_text())
         names = set()
         for node in ast.walk(tree):

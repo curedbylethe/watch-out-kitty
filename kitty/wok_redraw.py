@@ -19,7 +19,7 @@ value turning stale while no new reply arrives. Module state lives in
 `sys.modules`, so a `tab_bar.py` reload does not install a second timer.
 """
 
-from syswatch_refresh import report_error
+from wok_refresh import report_error
 
 REDRAW_INTERVAL_MS = 1000
 
