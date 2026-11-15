@@ -26,6 +26,18 @@ fn main() {
             println!("{}", args::UPDATE_USAGE);
             return;
         }
+        args::Command::StatusHelp => {
+            println!("{}", args::STATUS_USAGE);
+            return;
+        }
+        args::Command::UpdateDismissHelp => {
+            println!("{}", args::UPDATE_DISMISS_USAGE);
+            return;
+        }
+        args::Command::VersionHelp => {
+            println!("{}", args::VERSION_USAGE);
+            return;
+        }
         args::Command::Status => syswatch_core::protocol::RequestCommand::Status,
         args::Command::UpdateDismiss => syswatch_core::protocol::RequestCommand::Status,
         args::Command::Top { .. } => syswatch_core::protocol::RequestCommand::Processes,
@@ -98,10 +110,13 @@ fn main() {
         }
         args::Command::Help => return,
         args::Command::Version => return,
+        args::Command::VersionHelp => return,
+        args::Command::StatusHelp => return,
         args::Command::TopHelp => return,
         args::Command::SuggestionsHelp => return,
         args::Command::InspectHelp => return,
         args::Command::UpdateHelp => return,
+        args::Command::UpdateDismissHelp => return,
         args::Command::Close { .. } | args::Command::CloseHelp => return,
     };
     match rendered {
