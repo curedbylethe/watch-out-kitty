@@ -2,18 +2,18 @@
 
 Watch Out Kitty puts live CPU and memory numbers in the Kitty tab bar on macOS. A foreground daemon samples the system and answers the tab bar and a small command-line client. It also lists processes that hold a lot of memory while idle, and it signals nothing unless you confirm a `close`.
 
-```sh
-git clone https://github.com/curedbylethe/watch-out-kitty.git
-cd watch-out-kitty
-cargo build --workspace
-```
-
 ## Install
 
-You need macOS (tested with Kitty 0.49.2), Python 3.11 or newer with nothing to install, and a Rust stable toolchain. The build writes two binaries into `target/debug`: `wok` for commands and `wok-daemon` for the sampler. This document uses those names.
+```sh
+curl -fsSL https://raw.githubusercontent.com/curedbylethe/watch-out-kitty/main/install.sh | sh
+```
 
-1. Put the build on your PATH so that every new terminal finds it: `echo "export PATH=\"$PWD/target/debug:\$PATH\"" >> ~/.zshrc`, then a new terminal picks it up; stay in this clone for step 2. Use `~/.bash_profile` instead if your shell is bash.
-2. Link the adapter as `tab_bar.py` into the directory that holds the `kitty.conf` Kitty loads. Kitty uses `$KITTY_CONFIG_DIRECTORY` when set; otherwise the first existing file of `$XDG_CONFIG_HOME/kitty/kitty.conf`, `~/.config/kitty/kitty.conf`, `~/Library/Preferences/kitty/kitty.conf` and `$XDG_CONFIG_DIRS/kitty/kitty.conf`. The command below assumes `~/.config/kitty`; if your loaded `kitty.conf` is elsewhere, use that directory. Kitty's `edit_config_file` action (⌘, on macOS) shows the path.
+It installs `wok` and `wok-daemon` into `~/.local/bin`, adds that directory to your shell profile, and installs no Python package and no Rust toolchain. It handles macOS on Apple silicon and Intel, and Linux on x86_64 and aarch64; any other machine stops with a clear error. The profile line is added once: a re-run replaces the two binaries and adds nothing more.
+
+You need macOS (tested with Kitty 0.49.2) or Linux with glibc, and Kitty. Nothing needs installing for Python: Kitty runs the adapter with its own interpreter. `--dir <directory>` installs somewhere else; the default is `~/.local/bin`. This document uses `wok` for commands and `wok-daemon` for the sampler.
+
+1. Open a new terminal so `wok` is on your PATH.
+2. Link the adapter as `tab_bar.py` into the directory that holds the `kitty.conf` Kitty loads. The `ln -s` line below needs a repository checkout, as [Build from source](#build-from-source) shows; the checkout serves the adapter only, and nothing is built from it. Kitty uses `$KITTY_CONFIG_DIRECTORY` when set; otherwise the first existing file of `$XDG_CONFIG_HOME/kitty/kitty.conf`, `~/.config/kitty/kitty.conf`, `~/Library/Preferences/kitty/kitty.conf` and `$XDG_CONFIG_DIRS/kitty/kitty.conf`. The command below assumes `~/.config/kitty`; if your loaded `kitty.conf` is elsewhere, use that directory. Kitty's `edit_config_file` action (⌘, on macOS) shows the path.
 
    ```sh
    mkdir -p "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}"
@@ -49,6 +49,19 @@ Kitty loads one `tab_bar.py` per config directory, and nothing is merged automat
 - **No `tab_bar.py` yet.** Use the link from step 2. Keep your customization in `tab_title_template`; the adapter keeps it.
 - **Your `tab_bar.py` must stay as it is.** Do not install this adapter.
 - **Your `tab_bar.py` must keep drawing the tabs.** Do not install this adapter over it; it does not compose with a custom `tab_bar.py`.
+
+## Build from source
+
+The Rust toolchain is needed only to build from source. Clone the repository to build it, or just to get the adapter files install step 2 links; the checkout alone needs no build.
+
+```sh
+git clone https://github.com/curedbylethe/watch-out-kitty.git
+cd watch-out-kitty
+cargo build --workspace
+export PATH="$PWD/target/debug:$PATH"
+```
+
+The build writes `wok` and `wok-daemon` into `target/debug`. Use Rust stable. The `export` line lasts for that terminal; add it to your shell profile to keep it.
 
 ## Use
 
@@ -136,7 +149,7 @@ map kitty_mod+alt+i launch --type=overlay --title "wok inspect" sh -c 'printf "f
 
 Neither key touches a process. Neither mapping sends a signal or runs `wok close`.
 
-`launch` does not run a login shell, so `wok` must be on the PATH that Kitty inherits. If it is not, replace `wok` in both lines with the binary's absolute path, for example `/path/to/wok`.
+`launch` does not run a login shell, so `wok` must be on the PATH that Kitty inherits; the installer puts it in `~/.local/bin`. If it is not there, replace `wok` in both lines with the binary's absolute path, for example `/path/to/wok`.
 
 ### Closing a process
 
@@ -148,11 +161,10 @@ A requested signal is not a confirmed exit: the kernel delivers it to whichever 
 
 ## Upgrade
 
-Releases are tags of the form `vMAJOR.MINOR.PATCH`, for example `v0.2.0`. The release is the tag and its generated notes; no binary is attached, so you build from source.
+Releases are tags of the form `vMAJOR.MINOR.PATCH`, for example `v0.2.0`, and each release carries one archive per target. Run the installer again:
 
 ```sh
-git pull
-cargo build --workspace
+curl -fsSL https://raw.githubusercontent.com/curedbylethe/watch-out-kitty/main/install.sh | sh
 ```
 
 Then stop the daemon with Ctrl-C and start it again. Kitty needs no restart unless the adapter files changed.
@@ -184,9 +196,10 @@ Each version prompts at most once. `wok update dismiss` records the noticed vers
 Reverse the install in this order:
 
 1. Stop the daemon: press Ctrl-C in its terminal.
-2. Remove the link, not the file it points to, from the directory of the `kitty.conf` Kitty loads (see install step 2): `rm "<that directory>/tab_bar.py"`, with `~/.config/kitty` as the default. Run `ls -l` first; if the entry is a regular file, it is not this adapter, so leave it.
-3. Remove the three lines from `kitty.conf`.
-4. Restart Kitty. Removing the link while Kitty runs does not unload the bar until the restart.
+2. Remove the two binaries and the profile line: `rm ~/.local/bin/wok ~/.local/bin/wok-daemon`, then delete the `export PATH=` line naming that directory from the profile the installer edited. Use your `--dir` directory instead of `~/.local/bin` if you chose one.
+3. Remove the link, not the file it points to, from the directory of the `kitty.conf` Kitty loads (see install step 2): `rm "<that directory>/tab_bar.py"`, with `~/.config/kitty` as the default. Run `ls -l` first; if the entry is a regular file, it is not this adapter, so leave it.
+4. Remove the three lines from `kitty.conf`.
+5. Restart Kitty. Removing the link while Kitty runs does not unload the bar until the restart.
 
 The daemon keeps its telemetry in memory, and `wok update dismiss` is the only command that writes a file. On a clean stop the daemon removes the socket file and leaves its directory.
 
