@@ -237,7 +237,7 @@ fn parse_help(
         "close" => Ok(Command::CloseHelp),
         "update" => Ok(Command::UpdateHelp),
         "version" => Ok(Command::VersionHelp),
-        "help" => Ok(Command::Help),
+        "help" | "-h" | "--help" => Ok(Command::Help),
         other => Err(usage_error(&format!(
             "unrecognized help topic: {other}; expected help [<COMMAND>]"
         ))),
@@ -612,6 +612,13 @@ mod tests {
         assert!(error.contains("help [<COMMAND>]"), "{error}");
         let error = parse(args(&["help", "status", "extra"])).unwrap_err();
         assert!(error.contains("help [<COMMAND>]"), "{error}");
+    }
+
+    #[test]
+    fn help_answers_both_help_spellings() {
+        for values in [&["help", "-h"][..], &["help", "--help"]] {
+            assert_eq!(parse(args(values)), Ok(Command::Help), "{values:?}");
+        }
     }
 
     #[test]
