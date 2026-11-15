@@ -5,23 +5,101 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release
   cancel-in-progress: false
 
 jobs:
-  release:
+  check-tag:
     runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
-      - name: Create release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check tag format and workspace version
+        id: version
         run: |
           echo "$GITHUB_REF_NAME" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$' || {
             echo "tag does not match vMAJOR.MINOR.PATCH: $GITHUB_REF_NAME" >&2
             exit 1
           }
+          manifest="$(grep -m1 '^version = ' Cargo.toml | cut -d'"' -f2)"
+          tagged="${GITHUB_REF_NAME#v}"
+          if [ "$tagged" != "$manifest" ]; then
+            echo "tag version $tagged does not match workspace version $manifest" >&2
+            exit 1
+          fi
+          echo "version=$tagged" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: check-tag
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            native: true
+          - runner: macos-15
+            target: x86_64-apple-darwin
+            native: false
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            native: true
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            native: true
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and archive
+        env:
+          TARGET: ${{ matrix.target }}
+          VERSION: ${{ needs.check-tag.outputs.version }}
+        run: |
+          cargo build --workspace --release --target "$TARGET"
+          tar -czf "wok-$TARGET.tar.gz" -C "target/$TARGET/release" wok wok-daemon
+          entries="$(tar -tzf "wok-$TARGET.tar.gz" | sort)"
+          if [ "$entries" != "$(printf 'wok\nwok-daemon')" ]; then
+            echo "unexpected archive entries: $entries" >&2
+            exit 1
+          fi
+          if [ "${{ matrix.native }}" = "true" ]; then
+            scratch="$(mktemp -d)"
+            tar -xzf "wok-$TARGET.tar.gz" -C "$scratch"
+            got="$("$scratch/wok" --version)"
+            if [ "$got" != "wok $VERSION" ]; then
+              echo "unexpected version output: $got (want wok $VERSION)" >&2
+              exit 1
+            fi
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: wok-${{ matrix.target }}.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: dist-*
+          merge-multiple: true
+      - name: Create release and upload archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ls -l dist
           gh release create "$GITHUB_REF_NAME" --generate-notes
+          gh release upload "$GITHUB_REF_NAME" dist/*.tar.gz --clobber
