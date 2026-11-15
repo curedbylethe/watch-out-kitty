@@ -8,14 +8,14 @@ pub const USAGE: &str = "Usage: wok <COMMAND> [OPTIONS]
 Client for the wok daemon. Only close can request a process action.
 
 Commands:
-  status       Show CPU, memory and process freshness from the running daemon
-  top          Show cached processes, ordered by memory or CPU
-  suggestions  Show cached advisory findings for review
-  inspect      Explain one cached advisory finding
-  close        Preview one finding, then request SIGTERM after you type yes
-  update       Manage the update notice printed by status
-  version      Print the version and exit
-  help         Show this help
+  status         Show CPU, memory and process freshness from the running daemon
+  top            Show cached processes, ordered by memory or CPU
+  suggestions    Show cached advisory findings for review
+  inspect        Explain one cached advisory finding
+  close          Preview one finding, then request SIGTERM after you type yes
+  update         Manage the update notice printed by status
+  version        Print the version and exit
+  help           Show this help
 
 Options:
   -h, --help     Show this help
