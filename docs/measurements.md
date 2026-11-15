@@ -7,7 +7,8 @@ Part of [Watch Out Kitty](../README.md).
 Per-process CPU can exceed 100% when a process uses multiple cores. The first
 CPU sample is not representative. Memory reports occupied physical RAM, not
 macOS memory pressure. All values are point-in-time samples. Process names may
-contain replacement characters and are shortened to 24 characters. The daemon
+contain replacement characters and are shortened to 24 characters; finding
+explanations are shortened to 160 characters. The daemon
 keeps its last successful sample in memory between refreshes. The daemon exposes
 cached samples through the per-user socket described above. Process data can be
 older than aggregate data; the `*_updated_at_ms` fields show sample times.

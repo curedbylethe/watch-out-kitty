@@ -73,6 +73,9 @@ error before enough history is collected; `findings` is never `null`.
 
 The transport is local: the owner-only socket (`0600`, inside a `0700` directory) is
 the only access control, with no authentication layer and no remote access. The
+daemon creates a missing final directory with mode `0700` and refuses a directory
+other users can access. A client sends one JSON request line per connection; the
+server closes the connection after its reply. The
 monitoring requests are read-only and take no arguments. The close requests are
 the only process-control operations, and they carry only one finding identity.
 The protocol has no filesystem paths, argv, environment data, history request,

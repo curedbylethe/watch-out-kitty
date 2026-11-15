@@ -5,7 +5,8 @@ Part of [Watch Out Kitty](../README.md).
 The Rust 2024 workspace contains `crates/syswatch-core` for telemetry,
 `crates/syswatch-daemon` for foreground sampling, and `crates/syswatch-cli` for status,
 process-ranking, and advisory findings output. The Rust core is independent of Kitty
-rendering, daemon runtime, and CLI frameworks. Run
+rendering, daemon runtime, and CLI frameworks. The workspace uses Rust edition
+2024; no numeric `rustc` version is set. Run
 `cargo run -p syswatch-core --example snapshot` for one diagnostic snapshot.
 
 ## Update check
