@@ -10,7 +10,7 @@ fn run() -> Result<(), DaemonError> {
     let (receiver, signal_handle) = signals::install().map_err(DaemonError::Signal)?;
     let mut scheduler = Scheduler::new(SystemClock::new(receiver), sampler, config);
     eprintln!(
-        "syswatch-daemon: version {}, aggregate {:?}, processes {:?}",
+        "wok-daemon: version {}, aggregate {:?}, processes {:?}",
         env!("CARGO_PKG_VERSION"),
         config.aggregate_interval(),
         config.process_interval()
@@ -59,15 +59,15 @@ fn run() -> Result<(), DaemonError> {
             return Err(DaemonError::Socket(error));
         }
     };
-    eprintln!("syswatch-daemon: serving at {}", socket.display());
+    eprintln!("wok-daemon: serving at {}", socket.display());
     syswatch_daemon::update_check::start(update_latest);
     let result = scheduler.run().map_err(DaemonError::Scheduler);
     if let Err(error) = server.shutdown() {
-        eprintln!("syswatch-daemon: socket cleanup: {error}");
+        eprintln!("wok-daemon: socket cleanup: {error}");
     }
     signal_handle.stop();
     result?;
-    eprintln!("syswatch-daemon: stopped");
+    eprintln!("wok-daemon: stopped");
     Ok(())
 }
 
@@ -75,7 +75,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            eprintln!("syswatch-daemon: {error}");
+            eprintln!("wok-daemon: {error}");
             ExitCode::FAILURE
         }
     }

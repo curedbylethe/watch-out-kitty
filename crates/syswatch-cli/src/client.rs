@@ -46,7 +46,10 @@ pub fn request(
 ) -> Result<Response, ClientError> {
     let mut stream = UnixStream::connect(path).map_err(|error| {
         let message = if error.kind() == io::ErrorKind::NotFound {
-            format!("cannot connect to daemon at {}: no such file or directory; syswatch-daemon running?", path.display())
+            format!(
+                "cannot connect to daemon at {}: no such file or directory; wok-daemon running?",
+                path.display()
+            )
         } else {
             format!("cannot connect to daemon at {}: {error}", path.display())
         };
@@ -277,7 +280,7 @@ mod tests {
         let path =
             std::env::temp_dir().join(format!("syswatch-cli-missing-{}.sock", std::process::id()));
         let error = request(&path, RequestCommand::Status, None, TIMEOUT).unwrap_err();
-        assert!(error.to_string().contains("syswatch-daemon running?"));
+        assert!(error.to_string().contains("wok-daemon running?"));
     }
 
     #[test]

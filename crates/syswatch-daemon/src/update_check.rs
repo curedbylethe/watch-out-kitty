@@ -59,7 +59,7 @@ fn run(latest: Arc<Mutex<LatestSnapshot>>) {
                 .and_then(|path| update::load_state(&path));
             if notifier.should_notify(&release.version, dismissed) {
                 eprintln!(
-                    "syswatch-daemon: version {} is available at {}; set {}=1 to silence",
+                    "wok-daemon: version {} is available at {}; set {}=1 to silence",
                     release.version, release.url, UPDATE_DISABLE_ENV
                 );
             }

@@ -126,7 +126,7 @@ impl FindingId {
     }
 
     /// Canonical terminal form `<pid>-<start_time_secs>-<kind>`, the reference
-    /// `syswatch suggestions` prints and `syswatch inspect` accepts.
+    /// `wok suggestions` prints and `wok inspect` accepts.
     pub fn reference(&self) -> String {
         format!("{}-{}-{}", self.pid, self.start_time_secs, self.kind)
     }

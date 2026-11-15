@@ -146,7 +146,7 @@ pub fn poll(
 }
 
 pub fn spawn_daemon(socket: &Path) -> io::Result<Child> {
-    Command::new(env!("CARGO_BIN_EXE_syswatch-daemon"))
+    Command::new(env!("CARGO_BIN_EXE_wok-daemon"))
         .env("SYSWATCH_SOCKET", socket)
         // The gate stays offline: no daemon under test performs a release check.
         .env("SYSWATCH_DISABLE_UPDATE_CHECK", "1")
@@ -163,7 +163,7 @@ pub struct Daemon {
 impl Daemon {
     pub fn start(dir: &TempDir) -> Self {
         let socket = socket_path(dir);
-        let child = spawn_daemon(&socket).expect("spawn syswatch-daemon");
+        let child = spawn_daemon(&socket).expect("spawn wok-daemon");
         let mut daemon = Self {
             child: Some(child),
             socket,
@@ -242,7 +242,7 @@ pub fn cli_binary() -> PathBuf {
     let binary = find_cli_binary(&path);
     assert!(
         binary.is_some(),
-        "syswatch binary missing above {}; run cargo build --workspace",
+        "wok binary missing above {}; run cargo build --workspace",
         path.display()
     );
     binary.unwrap()
@@ -250,7 +250,7 @@ pub fn cli_binary() -> PathBuf {
 
 fn find_cli_binary(path: &Path) -> Option<PathBuf> {
     path.ancestors().find_map(|dir| {
-        let binary = dir.join("syswatch");
+        let binary = dir.join("wok");
         binary.is_file().then_some(binary)
     })
 }
@@ -273,7 +273,7 @@ pub fn run_cli(socket: &Path, args: &[&str]) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn syswatch CLI");
+        .expect("spawn wok CLI");
     wait_for_exit(child, Duration::from_secs(5))
 }
 
@@ -309,7 +309,7 @@ mod tests {
             .path()
             .join("target/debug/build/syswatch-daemon/hash/out/cli-test");
         fs::create_dir_all(test_executable.parent().unwrap()).unwrap();
-        let binary = dir.path().join("target/debug/syswatch");
+        let binary = dir.path().join("target/debug/wok");
         fs::create_dir_all(binary.parent().unwrap()).unwrap();
         fs::write(&binary, b"").unwrap();
 

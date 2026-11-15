@@ -24,7 +24,7 @@ fn daemon_socket_lifecycle_uses_cached_protocol_and_cleans_up_on_sigterm() {
         0o600
     );
 
-    let second = Command::new(env!("CARGO_BIN_EXE_syswatch-daemon"))
+    let second = Command::new(env!("CARGO_BIN_EXE_wok-daemon"))
         .env("SYSWATCH_SOCKET", &socket)
         .env("SYSWATCH_DISABLE_UPDATE_CHECK", "1")
         .output()
@@ -40,6 +40,6 @@ fn daemon_socket_lifecycle_uses_cached_protocol_and_cleans_up_on_sigterm() {
 
     let output = daemon.terminate();
     assert!(output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("syswatch-daemon: stopped"));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("wok-daemon: stopped"));
     assert!(!socket.exists());
 }

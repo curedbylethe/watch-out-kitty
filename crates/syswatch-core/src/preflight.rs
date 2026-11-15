@@ -25,7 +25,7 @@ use crate::snapshot::ProcessSnapshot;
 #[non_exhaustive]
 #[serde(rename_all = "snake_case")]
 pub enum RequestedAction {
-    /// The planned `syswatch close` action.
+    /// The planned `wok close` action.
     Close,
 }
 

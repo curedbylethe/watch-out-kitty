@@ -1,4 +1,4 @@
-//! Core types and logic for syswatch.
+//! Core types and logic for wok.
 
 pub mod action;
 pub mod alerts;

@@ -109,7 +109,7 @@ fn suggestions_command_rejects_unknown_arguments() {
     let output = run_cli(&socket_path(&dir), &["suggestions", "--limit", "3"]);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert_eq!(output.status.code(), Some(2));
-    assert!(stderr.contains("Usage: syswatch <COMMAND>"), "{stderr}");
+    assert!(stderr.contains("Usage: wok <COMMAND>"), "{stderr}");
 }
 
 #[test]
@@ -134,7 +134,7 @@ fn inspect_reports_the_unavailable_state() {
     assert!(output.stdout.is_empty());
     assert!(
         stderr.contains(
-            "syswatch: daemon error (unavailable): suggestions are not available until enough process history has been collected"
+            "wok: daemon error (unavailable): suggestions are not available until enough process history has been collected"
         ),
         "{stderr}"
     );
@@ -158,7 +158,7 @@ fn inspect_rejects_a_malformed_reference_before_connecting() {
     let output = run_cli(&socket_path(&dir), &["inspect", "42-5"]);
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(stderr.contains("Usage: syswatch"), "{stderr}");
+    assert!(stderr.contains("Usage: wok"), "{stderr}");
     assert!(
         stderr.contains("invalid finding reference: expected pid-start_time_secs-kind"),
         "{stderr}"
@@ -173,7 +173,7 @@ fn inspect_help_exits_zero() {
     let output = run_cli(&socket_path(&dir), &["inspect", "--help"]);
     assert!(output.status.success());
     assert!(
-        String::from_utf8_lossy(&output.stdout).contains("Usage: syswatch inspect"),
+        String::from_utf8_lossy(&output.stdout).contains("Usage: wok inspect"),
         "{}",
         String::from_utf8_lossy(&output.stdout)
     );
@@ -186,7 +186,7 @@ fn close_rejects_selectors_and_flags_before_connecting() {
         let output = run_cli(&socket_path(&dir), args);
         assert_eq!(output.status.code(), Some(2), "{args:?}");
         let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("Usage: syswatch close"), "{stderr}");
+        assert!(stderr.contains("Usage: wok close"), "{stderr}");
         assert!(!stderr.contains("cannot connect"), "{stderr}");
     }
 }
@@ -199,8 +199,7 @@ fn close_without_a_terminal_aborts_before_any_request() {
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr
-            .contains("syswatch: close requires an interactive terminal; no action was requested"),
+        stderr.contains("wok: close requires an interactive terminal; no action was requested"),
         "{stderr}"
     );
     assert!(!stderr.contains("cannot connect"), "{stderr}");
@@ -217,7 +216,7 @@ fn version_command_prints_the_binary_version_without_a_daemon() {
         assert!(output.status.success(), "{spelling}");
         assert_eq!(
             String::from_utf8_lossy(&output.stdout),
-            format!("syswatch {}\n", env!("CARGO_PKG_VERSION")),
+            format!("wok {}\n", env!("CARGO_PKG_VERSION")),
             "{spelling}"
         );
         assert!(output.stderr.is_empty(), "{spelling}");
@@ -233,7 +232,7 @@ fn close_help_exits_zero() {
         assert!(output.status.success(), "{args:?}");
         assert!(
             String::from_utf8_lossy(&output.stdout)
-                .contains("Usage: syswatch close <finding-reference>"),
+                .contains("Usage: wok close <finding-reference>"),
             "{}",
             String::from_utf8_lossy(&output.stdout)
         );
@@ -250,11 +249,11 @@ fn run_cli_with_state(socket: &Path, state: &Path, args: &[&str]) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .expect("spawn syswatch CLI");
+        .expect("spawn wok CLI");
     wait_for_exit(child, Duration::from_secs(5))
 }
 
-const UPDATE_USAGE_FIRST_LINE: &str = "Usage: syswatch update <COMMAND>";
+const UPDATE_USAGE_FIRST_LINE: &str = "Usage: wok update <COMMAND>";
 
 #[test]
 fn update_without_a_sub_command_prints_its_usage() {

@@ -207,7 +207,7 @@ fn accept_loop<F, A>(
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => thread::sleep(ACCEPT_POLL),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => {
-                eprintln!("syswatch-daemon: socket accept failed: {error}");
+                eprintln!("wok-daemon: socket accept failed: {error}");
                 thread::sleep(ACCEPT_POLL);
             }
         }
