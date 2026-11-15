@@ -12,7 +12,7 @@ It installs `wok` and `wok-daemon` into `~/.local/bin`, adds that directory to y
 
 You need macOS (tested with Kitty 0.49.2) or Linux with glibc, and Kitty. Nothing needs installing for Python: Kitty runs the adapter with its own interpreter. `--dir <directory>` installs somewhere else; the default is `~/.local/bin`. This document uses `wok` for commands and `wok-daemon` for the sampler.
 
-1. Open a new terminal so `wok` is on your PATH.
+1. Open a new terminal so `wok` is on your PATH. The installer edits `.zshrc` for zsh, and `.bash_profile` on macOS or `.bashrc` on Linux for bash; for any other shell, add the line it prints.
 2. Link the adapter as `tab_bar.py` into the directory that holds the `kitty.conf` Kitty loads. The `ln -s` line below needs a repository checkout, as [Build from source](#build-from-source) shows; the checkout serves the adapter only, and nothing is built from it. Kitty uses `$KITTY_CONFIG_DIRECTORY` when set; otherwise the first existing file of `$XDG_CONFIG_HOME/kitty/kitty.conf`, `~/.config/kitty/kitty.conf`, `~/Library/Preferences/kitty/kitty.conf` and `$XDG_CONFIG_DIRS/kitty/kitty.conf`. The command below assumes `~/.config/kitty`; if your loaded `kitty.conf` is elsewhere, use that directory. Kitty's `edit_config_file` action (⌘, on macOS) shows the path.
 
    ```sh
