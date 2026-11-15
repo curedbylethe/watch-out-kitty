@@ -68,6 +68,8 @@ stop the check entirely.
 | `kitty/tab_bar.py` | Installable Kitty tab bar: Kitty's tab drawing plus the CPU/RAM indicator and advisory marker |
 | `kitty/wok_indicator.py` | Indicator and advisory-marker text from the cached view; pure, no I/O |
 | `kitty/test_*.py` | Python client tests (`unittest`) |
-| `.github/workflows/ci.yml` | Ubuntu checks: Rust formatting, Clippy, build and tests, and the Python suite |
-| `.github/workflows/release.yml` | Creates a GitHub release with generated notes from a `v*` tag |
+| `install.sh` | `curl` installer: target detection, archive download, the two binaries, one `PATH` line |
+| `tests/test_install.py` | Installer tests (`unittest`, stubbed download, temporary `HOME`) |
+| `.github/workflows/ci.yml` | Ubuntu checks: Rust formatting, Clippy, build and tests, the Python suite, and the installer suite |
+| `.github/workflows/release.yml` | Builds one archive per target from a `v*` tag and attaches the archives to the generated-notes release; the only publisher |
 | `LICENSE` | Apache-2.0 license |
