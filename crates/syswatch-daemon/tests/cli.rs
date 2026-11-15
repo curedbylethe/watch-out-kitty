@@ -243,8 +243,8 @@ fn close_help_exits_zero() {
 fn run_cli_with_state(socket: &Path, state: &Path, args: &[&str]) -> Output {
     let child = Command::new(cli_binary())
         .args(args)
-        .env("SYSWATCH_SOCKET", socket)
-        .env("SYSWATCH_UPDATE_STATE", state)
+        .env("WOK_SOCKET", socket)
+        .env("WOK_UPDATE_STATE", state)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

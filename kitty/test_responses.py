@@ -225,7 +225,7 @@ class TransportMappingTests(unittest.TestCase):
                 self.assertEqual(read_status(SOCKET).state, reason)
 
     def test_relative_socket_env_is_socket_path_invalid(self):
-        with patch.dict(os.environ, {"SYSWATCH_SOCKET": "rel.sock"}, clear=True), patch(
+        with patch.dict(os.environ, {"WOK_SOCKET": "rel.sock"}, clear=True), patch(
             "wok_client.request_line"
         ) as request:
             result = read_status()

@@ -5,8 +5,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-pub const SOCKET_PATH_ENV: &str = "SYSWATCH_SOCKET";
-pub const SOCKET_FILE_NAME: &str = "syswatch.sock";
+pub const SOCKET_PATH_ENV: &str = "WOK_SOCKET";
+pub const SOCKET_FILE_NAME: &str = "wok.sock";
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum SocketPathError {
@@ -19,7 +19,7 @@ impl fmt::Display for SocketPathError {
         match self {
             Self::NotConfigured => write!(
                 f,
-                "no socket path configured; set SYSWATCH_SOCKET to an absolute path, or XDG_RUNTIME_DIR, or HOME"
+                "no socket path configured; set WOK_SOCKET to an absolute path, or XDG_RUNTIME_DIR, or HOME"
             ),
             Self::RelativePath(path) => {
                 write!(f, "socket path must be absolute: {}", path.display())
@@ -107,7 +107,7 @@ mod tests {
     fn empty_explicit_path_is_ignored() {
         assert_eq!(
             resolve_socket_path(Some(os("")), Some(os("/run/user")), None),
-            Ok(PathBuf::from("/run/user/syswatch.sock"))
+            Ok(PathBuf::from("/run/user/wok.sock"))
         );
     }
 
@@ -115,7 +115,7 @@ mod tests {
     fn runtime_dir_wins_over_home() {
         assert_eq!(
             resolve_socket_path(None, Some(os("/run/user/42")), Some(os("/home/user"))),
-            Ok(PathBuf::from("/run/user/42/syswatch.sock"))
+            Ok(PathBuf::from("/run/user/42/wok.sock"))
         );
     }
 
@@ -123,7 +123,7 @@ mod tests {
     fn home_is_the_fallback_for_macos() {
         assert_eq!(
             resolve_socket_path(None, None, Some(os("/Users/alice"))),
-            Ok(PathBuf::from("/Users/alice/.local/run/syswatch.sock"))
+            Ok(PathBuf::from("/Users/alice/.local/run/wok.sock"))
         );
     }
 
@@ -131,7 +131,7 @@ mod tests {
     fn relative_runtime_dir_falls_back_to_home() {
         assert_eq!(
             resolve_socket_path(None, Some(os("relative")), Some(os("/home/user"))),
-            Ok(PathBuf::from("/home/user/.local/run/syswatch.sock"))
+            Ok(PathBuf::from("/home/user/.local/run/wok.sock"))
         );
     }
 
