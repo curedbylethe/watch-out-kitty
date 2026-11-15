@@ -192,7 +192,7 @@ The daemon keeps its telemetry in memory, and `syswatch update dismiss` is the o
 
 ## Where the rest lives
 
-- [Module map and data flow](docs/architecture.md)
+- [Module map](docs/architecture.md)
 - [Measurement semantics, advisory findings and process actions](docs/measurements.md)
 - [Kitty adapter internals and the manual checklist](docs/kitty-adapter.md)
 - [Socket protocol](docs/protocol.md)
