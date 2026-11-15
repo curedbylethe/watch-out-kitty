@@ -3,23 +3,42 @@ use syswatch_core::{
     report::ProcessSort,
 };
 
-pub const USAGE: &str = "Usage: wok <COMMAND>
+pub const USAGE: &str = "Usage: wok <COMMAND> [OPTIONS]
 
 Client for the wok daemon. Only close can request a process action.
 
 Commands:
-  status  Show CPU, memory and process freshness from the running daemon
-  top     Show cached processes (--sort memory|cpu, default memory; --limit N, default 10)
-  suggestions  Show cached advisory findings for review; never acts on a process
-  inspect  Explain one cached advisory finding (pid-start_time_secs-kind)
-  close  Preview one finding, then request SIGTERM after you type yes
-  update  Dismiss the update notice printed by status
-  version  Print the version and exit
-  help    Show this help
+  status       Show CPU, memory and process freshness from the running daemon
+  top          Show cached processes, ordered by memory or CPU
+  suggestions  Show cached advisory findings for review
+  inspect      Explain one cached advisory finding
+  close        Preview one finding, then request SIGTERM after you type yes
+  update       Manage the update notice printed by status
+  version      Print the version and exit
+  help         Show this help
 
 Options:
-  -h, --help  Show this help
-  -V, --version  Print the version and exit";
+  -h, --help     Show this help
+  -V, --version  Print the version and exit
+
+Exit codes:
+  0  Success
+  1  Runtime failure, such as a missing daemon
+  2  Usage error";
+
+pub const STATUS_USAGE: &str = "Usage: wok status
+
+Show CPU, memory and process freshness from the running daemon.
+
+Options:
+  -h, --help  Show this help";
+
+pub const VERSION_USAGE: &str = "Usage: wok version
+
+Print the version and exit.
+
+Options:
+  -h, --help  Show this help";
 
 pub const VERSION: &str = concat!("wok ", env!("CARGO_PKG_VERSION"));
 
@@ -27,8 +46,8 @@ pub const TOP_USAGE: &str = "Usage: wok top [--sort memory|cpu] [--limit N]
 
 Options:
   --sort memory|cpu  Process order (default: memory)
-  --limit N           Maximum rows, positive integer (default: 10)
-  -h, --help          Show this help";
+  --limit N          Maximum rows, positive integer (default: 10)
+  -h, --help         Show this help";
 
 pub const SUGGESTIONS_USAGE: &str = "Usage: wok suggestions
 
@@ -70,9 +89,18 @@ Commands:
 Options:
   -h, --help  Show this help";
 
+pub const UPDATE_DISMISS_USAGE: &str = "Usage: wok update dismiss
+
+Silence the current update notice. The dismissal is durable across restarts
+until a newer version appears.
+
+Options:
+  -h, --help  Show this help";
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Command {
     Status,
+    StatusHelp,
     Top { sort: ProcessSort, limit: usize },
     TopHelp,
     Suggestions,
@@ -82,8 +110,10 @@ pub enum Command {
     Close { reference: FindingId },
     CloseHelp,
     UpdateDismiss,
+    UpdateDismissHelp,
     UpdateHelp,
     Version,
+    VersionHelp,
     Help,
 }
 
@@ -107,10 +137,28 @@ pub fn parse(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
     let command = command.to_string_lossy();
     match command.as_ref() {
         "help" | "-h" | "--help" => parse_help(&command, args),
-        "status" if args.next().is_none() => Ok(Command::Status),
-        "status" => Err(usage_error("status accepts no arguments")),
-        "version" | "-V" | "--version" if args.next().is_none() => Ok(Command::Version),
-        "version" | "-V" | "--version" => Err(usage_error("version accepts no arguments")),
+        "status" => match args.next() {
+            None => Ok(Command::Status),
+            Some(argument)
+                if matches!(argument.to_string_lossy().as_ref(), "-h" | "--help")
+                    && args.next().is_none() =>
+            {
+                Ok(Command::StatusHelp)
+            }
+            Some(_) => Err(usage_error("status accepts no arguments")),
+        },
+        "version" => match args.next() {
+            None => Ok(Command::Version),
+            Some(argument)
+                if matches!(argument.to_string_lossy().as_ref(), "-h" | "--help")
+                    && args.next().is_none() =>
+            {
+                Ok(Command::VersionHelp)
+            }
+            Some(_) => Err(usage_error("version accepts no arguments")),
+        },
+        "-V" | "--version" if args.next().is_none() => Ok(Command::Version),
+        "-V" | "--version" => Err(usage_error("version accepts no arguments")),
         "top" => parse_top(args),
         "suggestions" => parse_suggestions(args),
         "inspect" => parse_inspect(args),
@@ -129,8 +177,16 @@ fn parse_update(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Co
     match first.as_ref() {
         "-h" | "--help" if args.next().is_none() => Ok(Command::UpdateHelp),
         "-h" | "--help" => Err(update_usage_error("update help accepts no arguments")),
-        "dismiss" if args.next().is_none() => Ok(Command::UpdateDismiss),
-        "dismiss" => Err(update_usage_error("update dismiss accepts no arguments")),
+        "dismiss" => match args.next() {
+            None => Ok(Command::UpdateDismiss),
+            Some(argument)
+                if matches!(argument.to_string_lossy().as_ref(), "-h" | "--help")
+                    && args.next().is_none() =>
+            {
+                Ok(Command::UpdateDismissHelp)
+            }
+            Some(_) => Err(update_usage_error("update dismiss accepts no arguments")),
+        },
         other => Err(update_usage_error(&format!(
             "unrecognized update sub-command: {other}"
         ))),
@@ -287,10 +343,22 @@ fn parse_top(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Comma
 #[cfg(test)]
 mod tests {
     use super::{
-        CLOSE_USAGE, Command, INSPECT_USAGE, SUGGESTIONS_USAGE, TOP_USAGE, UPDATE_USAGE, USAGE,
-        VERSION, parse,
+        CLOSE_USAGE, Command, INSPECT_USAGE, STATUS_USAGE, SUGGESTIONS_USAGE, TOP_USAGE,
+        UPDATE_DISMISS_USAGE, UPDATE_USAGE, USAGE, VERSION, VERSION_USAGE, parse,
     };
     const USAGE_MARKER: &str = "wok:";
+    /// Every block a help spelling can print, top-level first.
+    const BLOCKS: [&str; 9] = [
+        USAGE,
+        STATUS_USAGE,
+        TOP_USAGE,
+        SUGGESTIONS_USAGE,
+        INSPECT_USAGE,
+        CLOSE_USAGE,
+        UPDATE_USAGE,
+        UPDATE_DISMISS_USAGE,
+        VERSION_USAGE,
+    ];
     use syswatch_core::{
         findings::{FindingId, FindingKind},
         report::ProcessSort,
@@ -298,6 +366,151 @@ mod tests {
 
     fn args(values: &[&str]) -> Vec<std::ffi::OsString> {
         values.iter().map(std::ffi::OsString::from).collect()
+    }
+
+    /// Splits a help block into `(header, indented rows)` pairs. A header is a
+    /// column-zero line ending in `:`; prose paragraphs are skipped.
+    fn sections(block: &str) -> Vec<(&str, Vec<&str>)> {
+        let mut sections: Vec<(&str, Vec<&str>)> = Vec::new();
+        for line in block.lines() {
+            if line.starts_with("  ") {
+                let (_, rows) = sections.last_mut().expect("indented row outside a section");
+                rows.push(line);
+            } else if line.ends_with(':') {
+                sections.push((line, Vec::new()));
+            }
+        }
+        sections
+    }
+
+    /// Rows of one section, empty when the block has no such section.
+    fn section<'a>(block: &'a str, header: &str) -> Vec<&'a str> {
+        sections(block)
+            .into_iter()
+            .find(|(name, _)| *name == header)
+            .map(|(_, rows)| rows)
+            .unwrap_or_default()
+    }
+
+    /// Index where the description column starts: the first run of two or more
+    /// spaces after the two-space indent and the command or flag name.
+    fn description_column(row: &str) -> usize {
+        let bytes = row.as_bytes();
+        assert!(
+            bytes.len() > 3 && bytes[0] == b' ' && bytes[1] == b' ' && bytes[2] != b' ',
+            "row must start with exactly two spaces: {row:?}"
+        );
+        let mut index = 2;
+        while index + 1 < bytes.len() {
+            if bytes[index] == b' ' && bytes[index + 1] == b' ' {
+                break;
+            }
+            index += 1;
+        }
+        while index < bytes.len() && bytes[index] == b' ' {
+            index += 1;
+        }
+        assert!(index < bytes.len(), "row has no description: {row:?}");
+        index
+    }
+
+    #[test]
+    fn every_command_prints_its_own_block() {
+        for (values, expected) in [
+            (&["status", "-h"][..], Command::StatusHelp),
+            (&["status", "--help"], Command::StatusHelp),
+            (&["top", "-h"], Command::TopHelp),
+            (&["top", "--help"], Command::TopHelp),
+            (&["suggestions", "-h"], Command::SuggestionsHelp),
+            (&["suggestions", "--help"], Command::SuggestionsHelp),
+            (&["inspect", "-h"], Command::InspectHelp),
+            (&["inspect", "--help"], Command::InspectHelp),
+            (&["close", "-h"], Command::CloseHelp),
+            (&["close", "--help"], Command::CloseHelp),
+            (&["update", "-h"], Command::UpdateHelp),
+            (&["update", "--help"], Command::UpdateHelp),
+            (&["update", "dismiss", "-h"], Command::UpdateDismissHelp),
+            (&["update", "dismiss", "--help"], Command::UpdateDismissHelp),
+            (&["version", "-h"], Command::VersionHelp),
+            (&["version", "--help"], Command::VersionHelp),
+        ] {
+            assert_eq!(parse(args(values)), Ok(expected), "{values:?}");
+        }
+    }
+
+    #[test]
+    fn every_block_documents_its_flags() {
+        let blocks: [(&str, &[&str]); 9] = [
+            (USAGE, &["-h, --help", "-V, --version"]),
+            (STATUS_USAGE, &["-h, --help"]),
+            (TOP_USAGE, &["--sort memory|cpu", "--limit N", "-h, --help"]),
+            (SUGGESTIONS_USAGE, &["-h, --help"]),
+            (INSPECT_USAGE, &["-h, --help"]),
+            (CLOSE_USAGE, &["-h, --help"]),
+            (UPDATE_USAGE, &["-h, --help"]),
+            (UPDATE_DISMISS_USAGE, &["-h, --help"]),
+            (VERSION_USAGE, &["-h, --help"]),
+        ];
+        for (block, flags) in blocks {
+            for flag in flags {
+                assert!(block.contains(flag), "{flag:?} missing from {block}");
+            }
+        }
+    }
+
+    #[test]
+    fn reference_commands_document_their_argument() {
+        for block in [INSPECT_USAGE, CLOSE_USAGE] {
+            assert!(
+                section(block, "Arguments:")
+                    .iter()
+                    .any(|row| row.contains("<finding-reference>")),
+                "{block}"
+            );
+        }
+        for block in [
+            USAGE,
+            STATUS_USAGE,
+            TOP_USAGE,
+            SUGGESTIONS_USAGE,
+            UPDATE_USAGE,
+            UPDATE_DISMISS_USAGE,
+            VERSION_USAGE,
+        ] {
+            assert!(!block.contains("Arguments:"), "{block}");
+        }
+    }
+
+    #[test]
+    fn every_synopsis_follows_one_shape() {
+        for block in BLOCKS {
+            let synopsis = block.lines().next().expect("block is not empty");
+            assert!(synopsis.starts_with("Usage: wok "), "{synopsis:?}");
+            for row in section(block, "Commands:") {
+                let name = row.split_whitespace().next().expect("row names a command");
+                assert!(!name.starts_with('-'), "{row:?}");
+                assert!(!row.contains("--"), "flag detail in command row {row:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_section_row_is_aligned() {
+        for block in BLOCKS {
+            let all = sections(block);
+            assert!(!all.is_empty(), "{block}");
+            for (header, rows) in all {
+                let column = description_column(rows[0]);
+                for row in rows {
+                    assert!(row.starts_with("  "), "{row:?}");
+                    assert_eq!(
+                        description_column(row),
+                        column,
+                        "misaligned row {row:?} in {header}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -324,11 +537,14 @@ mod tests {
 
     #[test]
     fn status_rejects_extra_arguments() {
-        assert!(
-            parse(args(&["status", "extra"]))
-                .unwrap_err()
-                .contains("status accepts no arguments")
-        );
+        for values in [&["status", "extra"][..], &["status", "--help", "extra"]] {
+            assert!(
+                parse(args(values))
+                    .unwrap_err()
+                    .contains("status accepts no arguments"),
+                "{values:?}"
+            );
+        }
     }
 
     #[test]
@@ -340,8 +556,13 @@ mod tests {
 
     #[test]
     fn version_rejects_extra_arguments() {
-        for spelling in ["version", "-V", "--version"] {
-            let error = parse(args(&[spelling, "extra"])).unwrap_err();
+        for values in [
+            &["version", "extra"][..],
+            &["version", "--help", "extra"],
+            &["-V", "extra"],
+            &["--version", "extra"],
+        ] {
+            let error = parse(args(values)).unwrap_err();
             assert!(error.contains("version accepts no arguments"), "{error}");
             assert!(error.contains(USAGE), "usage missing from {error}");
         }
@@ -520,9 +741,23 @@ mod tests {
             parse(args(&["update", "dismiss"])),
             Ok(Command::UpdateDismiss)
         );
-        assert!(USAGE.contains("  update  "), "{USAGE}");
+        assert!(
+            section(USAGE, "Commands:")
+                .iter()
+                .any(|row| row.split_whitespace().next() == Some("update")),
+            "{USAGE}"
+        );
         assert!(UPDATE_USAGE.contains("Usage: wok update <COMMAND>"));
-        assert!(UPDATE_USAGE.contains("  dismiss  "), "{UPDATE_USAGE}");
+        assert!(
+            section(UPDATE_USAGE, "Commands:")
+                .iter()
+                .any(|row| row.split_whitespace().next() == Some("dismiss")),
+            "{UPDATE_USAGE}"
+        );
+        assert_eq!(
+            parse(args(&["update", "dismiss", "--help"])),
+            Ok(Command::UpdateDismissHelp)
+        );
     }
 
     #[test]
@@ -540,6 +775,7 @@ mod tests {
 
         for values in [
             &["update", "dismiss", "extra"][..],
+            &["update", "dismiss", "--help", "extra"],
             &["update", "--help", "dismiss"],
             &["update", "check"],
         ] {
