@@ -13,8 +13,7 @@ action service that requests at most one SIGTERM after a fresh allowed preflight
 and `src/report.rs`.
 The CLI modules are `src/args.rs`, `src/client.rs`, `src/output.rs`, and `src/main.rs`.
 The core's `examples/snapshot.rs` prints one diagnostic snapshot. See `README.md`
-for setup, and `docs/architecture.md` for the example, the module map and the
-data flow.
+for setup, and `docs/architecture.md` for the example and the module map.
 
 ## Architecture boundary
 

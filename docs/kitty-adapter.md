@@ -6,7 +6,7 @@ Part of [Watch Out Kitty](../README.md).
 
 `kitty/syswatch_client.py` reads the daemon's cached status and suggestions for Kitty integration code. It needs Python 3.11 or newer and the standard library only. Add the `kitty/` directory to `sys.path`, then `import syswatch_client`.
 
-The client sends one `status` or `suggestions` request per call over the socket described in [Daemon socket](protocol.md). It never sends `processes` or a close request, opens no TCP connection, runs no shell command, polls no OS metric, and writes nothing to disk.
+The client sends one `status` or `suggestions` request per call over the socket described in [Socket protocol](protocol.md). It never sends `processes` or a close request, opens no TCP connection, runs no shell command, polls no OS metric, and writes nothing to disk.
 
 - `read_status(socket_path=None, *, timeout_ms=1000, now_ms=None, max_age_ms=None)` returns a `ClientResult`.
 - `read_suggestions(...)` takes the same arguments and returns a `ClientResult`.
