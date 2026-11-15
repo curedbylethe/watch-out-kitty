@@ -9,7 +9,7 @@ import unittest
 from contextlib import contextmanager
 from unittest.mock import patch
 
-from syswatch_client import MAX_RESPONSE_BYTES, TransportError, read_status, request_line
+from wok_client import MAX_RESPONSE_BYTES, TransportError, read_status, request_line
 
 
 def read_line(conn):
@@ -162,13 +162,13 @@ class RequestLineTests(unittest.TestCase):
 
     def test_unsupported_commands_raise_before_connecting(self):
         for command in ("close_confirm", "processes", "", None, 5):
-            with self.subTest(command=command), patch("syswatch_client.socket.socket") as sock:
+            with self.subTest(command=command), patch("wok_client.socket.socket") as sock:
                 with self.assertRaises(ValueError):
                     request_line("/unused.sock", command)
                 sock.assert_not_called()
 
     def test_zero_timeout_raises_before_connecting(self):
-        with patch("syswatch_client.socket.socket") as sock:
+        with patch("wok_client.socket.socket") as sock:
             with self.assertRaises(ValueError):
                 request_line("/unused.sock", "status", timeout_ms=0)
             sock.assert_not_called()

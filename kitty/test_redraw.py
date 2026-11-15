@@ -6,9 +6,9 @@ import unittest
 from contextlib import redirect_stderr
 from unittest import mock
 
-import syswatch_redraw
-import syswatch_refresh
-from syswatch_redraw import install_redraw_timer
+import wok_redraw
+import wok_refresh
+from wok_redraw import install_redraw_timer
 
 
 class FakeManager:
@@ -31,9 +31,9 @@ class FakeTimer:
 
 class RedrawTest(unittest.TestCase):
     def setUp(self):
-        syswatch_redraw._timer_id = None
-        syswatch_redraw._last_key = None
-        syswatch_refresh._reported.clear()
+        wok_redraw._timer_id = None
+        wok_redraw._last_key = None
+        wok_refresh._reported.clear()
         quiet = mock.patch("sys.stderr", io.StringIO())  # expected errors stay out of test output
         quiet.start()
         self.addCleanup(quiet.stop)
@@ -145,7 +145,7 @@ class RedrawTest(unittest.TestCase):
         with redirect_stderr(err):
             self.tick()
         self.assertEqual(self.managers[1].marked, 1)
-        self.assertEqual(err.getvalue(), "syswatch: redraw window: RuntimeError: closed window\n")
+        self.assertEqual(err.getvalue(), "wok: redraw window: RuntimeError: closed window\n")
 
     def test_manager_without_method_is_skipped(self):
         self.managers.append(object())
@@ -172,7 +172,7 @@ class RedrawTest(unittest.TestCase):
         self.assertEqual(self.managers[0].marked, 1)
 
     def test_redraw_module_has_no_kitty_import_or_io(self):
-        path = pathlib.Path(__file__).with_name("syswatch_redraw.py")
+        path = pathlib.Path(__file__).with_name("wok_redraw.py")
         tree = ast.parse(path.read_text())
         top_level = {
             alias.name.split(".")[0]

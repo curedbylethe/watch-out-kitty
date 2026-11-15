@@ -1,8 +1,8 @@
-"""Kitty tab bar with the syswatch CPU/RAM indicator at the right edge.
+"""Kitty tab bar with the wok CPU/RAM indicator at the right edge.
 
 Install: symlink this file to `<kitty config dir>/tab_bar.py` and set
 `tab_bar_style custom`. Use a symlink, not a copy: `resolve()` follows it to
-this directory, where the `syswatch_*` adapter modules live.
+this directory, where the `wok_*` adapter modules live.
 
 Every tab is drawn by Kitty's own default `fade` style. After the last tab, the
 indicator text is painted at the right edge, or nothing when it does not fit.
@@ -17,10 +17,10 @@ from kitty.tab_bar import as_rgb, draw_tab_with_fade
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from syswatch_cache import get_shared  # noqa: E402
-from syswatch_indicator import GAP_COLUMNS, MAX_INDICATOR_TEXT, fit, render  # noqa: E402
-from syswatch_redraw import install_redraw_timer  # noqa: E402
-from syswatch_refresh import install_refresh_timer  # noqa: E402
+from wok_cache import get_shared  # noqa: E402
+from wok_indicator import GAP_COLUMNS, MAX_INDICATOR_TEXT, fit, render  # noqa: E402
+from wok_redraw import install_redraw_timer  # noqa: E402
+from wok_refresh import install_refresh_timer  # noqa: E402
 
 _cache = None
 # Widest indicator text with its advisory marker, the gap, and Kitty's trailing space after the last tab.
