@@ -44,6 +44,8 @@ pub const VERSION: &str = concat!("wok ", env!("CARGO_PKG_VERSION"));
 
 pub const TOP_USAGE: &str = "Usage: wok top [--sort memory|cpu] [--limit N]
 
+Show cached processes, ordered by memory or CPU.
+
 Options:
   --sort memory|cpu  Process order (default: memory)
   --limit N          Maximum rows, positive integer (default: 10)
@@ -501,6 +503,9 @@ mod tests {
         for block in BLOCKS {
             let synopsis = block.lines().next().expect("block is not empty");
             assert!(synopsis.starts_with("Usage: wok "), "{synopsis:?}");
+            let description = block.lines().nth(2).expect("block has a description line");
+            assert!(!description.is_empty(), "{block}");
+            assert!(!description.ends_with(':'), "no description in {block}");
             for row in section(block, "Commands:") {
                 let name = row.split_whitespace().next().expect("row names a command");
                 assert!(!name.starts_with('-'), "{row:?}");
