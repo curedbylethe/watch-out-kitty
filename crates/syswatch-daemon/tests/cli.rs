@@ -249,6 +249,129 @@ fn close_help_exits_zero() {
     }
 }
 
+/// One row per command: the argv before the help spelling, the block's first
+/// line, and the flags that block must document. `help` has no row of its own;
+/// its block is the usage block checked by the byte-identity test.
+const HELP_BLOCKS: [(&[&str], &str, &[&str]); 8] = [
+    (&["status"], "Usage: wok status", &["-h", "--help"]),
+    (
+        &["top"],
+        "Usage: wok top [--sort memory|cpu] [--limit N]",
+        &["--sort", "--limit", "-h", "--help"],
+    ),
+    (
+        &["suggestions"],
+        "Usage: wok suggestions",
+        &["-h", "--help"],
+    ),
+    (
+        &["inspect"],
+        "Usage: wok inspect <finding-reference>",
+        &["<finding-reference>", "-h", "--help"],
+    ),
+    (
+        &["close"],
+        "Usage: wok close <finding-reference>",
+        &["<finding-reference>", "-h", "--help"],
+    ),
+    (
+        &["update"],
+        "Usage: wok update <COMMAND>",
+        &["dismiss", "-h", "--help"],
+    ),
+    (
+        &["update", "dismiss"],
+        "Usage: wok update dismiss",
+        &["-h", "--help"],
+    ),
+    (&["version"], "Usage: wok version", &["-h", "--help"]),
+];
+
+#[test]
+fn every_command_answers_both_help_spellings_with_its_own_block() {
+    let dir = TempDir::new();
+    let socket = socket_path(&dir);
+
+    for (prefix, first_line, flags) in HELP_BLOCKS {
+        for spelling in ["-h", "--help"] {
+            let mut args = prefix.to_vec();
+            args.push(spelling);
+            let output = run_cli(&socket, &args);
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert_eq!(output.status.code(), Some(0), "{args:?}");
+            assert!(output.stderr.is_empty(), "{args:?}: {:?}", output.stderr);
+            assert!(stdout.starts_with(first_line), "{args:?}: {stdout}");
+            for flag in flags {
+                assert!(stdout.contains(flag), "{args:?} lacks {flag:?}: {stdout}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_three_top_level_help_spellings_print_the_same_block() {
+    let dir = TempDir::new();
+    let socket = socket_path(&dir);
+
+    let outputs: Vec<Output> = ["--help", "-h", "help"]
+        .into_iter()
+        .map(|spelling| run_cli(&socket, &[spelling]))
+        .collect();
+    for output in &outputs {
+        assert_eq!(output.status.code(), Some(0));
+        assert!(output.stderr.is_empty(), "{:?}", output.stderr);
+    }
+    assert_eq!(outputs[0].stdout, outputs[1].stdout);
+    assert_eq!(outputs[0].stdout, outputs[2].stdout);
+
+    let stdout = String::from_utf8_lossy(&outputs[0].stdout);
+    for section in [
+        "Usage: wok <COMMAND>",
+        "Commands:",
+        "Options:",
+        "Exit codes:",
+    ] {
+        assert!(stdout.contains(section), "missing {section:?} in {stdout}");
+    }
+    for code in ["0  Success", "1  Runtime failure", "2  Usage error"] {
+        assert!(stdout.contains(code), "missing {code:?} in {stdout}");
+    }
+}
+
+#[test]
+fn help_topic_prints_that_commands_block() {
+    let dir = TempDir::new();
+    let socket = socket_path(&dir);
+
+    for (prefix, first_line, _) in HELP_BLOCKS {
+        let [name] = prefix else { continue };
+        let output = run_cli(&socket, &["help", *name]);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(output.status.code(), Some(0), "{name}");
+        assert!(output.stderr.is_empty(), "{name}: {:?}", output.stderr);
+        assert!(stdout.starts_with(first_line), "{name}: {stdout}");
+    }
+
+    let output = run_cli(&socket, &["help", "help"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(output.stderr.is_empty(), "{:?}", output.stderr);
+    assert!(stdout.starts_with("Usage: wok <COMMAND>"), "{stdout}");
+}
+
+#[test]
+fn the_lowercase_v_is_an_unknown_command() {
+    let dir = TempDir::new();
+
+    let output = run_cli(&socket_path(&dir), &["-v"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty(), "{:?}", output.stdout);
+    assert!(stderr.contains("unrecognized command: -v"), "{stderr}");
+    assert!(stderr.contains("Usage: wok <COMMAND>"), "{stderr}");
+    assert!(stderr.contains("Exit codes:"), "{stderr}");
+}
+
 /// Runs the CLI with the update state path pointed at a temporary file.
 fn run_cli_with_state(socket: &Path, state: &Path, args: &[&str]) -> Output {
     let child = Command::new(cli_binary())
