@@ -13,7 +13,8 @@ action service that requests at most one SIGTERM after a fresh allowed preflight
 and `src/report.rs`.
 The CLI modules are `src/args.rs`, `src/client.rs`, `src/output.rs`, and `src/main.rs`.
 The core's `examples/snapshot.rs` prints one diagnostic snapshot. See `README.md`
-for setup and the example.
+for setup and the example. The module map and the data flow are in
+`docs/architecture.md`.
 
 ## Architecture boundary
 
@@ -46,8 +47,9 @@ The Python suite is part of the gate. It runs headless and must stay standard
 library only. It must not require Kitty, a display, a running daemon, the
 user's socket path, or network access; use fakes and temporary sockets. Behavior
 that needs a real Kitty session (rendering, repaint cadence, themes, single-tab
-visibility, config reload) is verified by the manual checklist in `README.md` and
-recorded in the pull request, never by a skipped test.
+visibility, config reload) is verified by the manual checklist in
+`docs/kitty-adapter.md` and recorded in the pull request, never by a skipped
+test.
 
 ## Data semantics
 
