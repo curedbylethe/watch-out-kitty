@@ -12,10 +12,11 @@ cargo build --workspace
 
 You need macOS (tested with Kitty 0.49.2), Python 3.11 or newer with nothing to install, and a Rust stable toolchain. The build writes two binaries into `target/debug`: `syswatch` for commands and `syswatch-daemon` for the sampler. This document uses those names.
 
-1. Clone the repository and build the workspace: `git clone https://github.com/curedbylethe/watch-out-kitty.git`, then `cd watch-out-kitty` and `cargo build --workspace`. The binaries land in `target/debug`, so add it to the PATH of the shells you use: `export PATH="$PWD/target/debug:$PATH"`.
+1. Put the build on your PATH so that every new terminal finds it: `echo "export PATH=\"$PWD/target/debug:\$PATH\"" >> ~/.zshrc`, then open a new terminal. Use `~/.bash_profile` instead if your shell is bash.
 2. Link the adapter as `tab_bar.py` into the directory that holds the `kitty.conf` Kitty loads. Kitty uses `$KITTY_CONFIG_DIRECTORY` when set; otherwise the first existing file of `$XDG_CONFIG_HOME/kitty/kitty.conf`, `~/.config/kitty/kitty.conf`, `~/Library/Preferences/kitty/kitty.conf` and `$XDG_CONFIG_DIRS/kitty/kitty.conf`. The command below assumes `~/.config/kitty`; if your loaded `kitty.conf` is elsewhere, use that directory. Kitty's `edit_config_file` action (⌘, on macOS) shows the path.
 
    ```sh
+   mkdir -p "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}"
    ln -s "$PWD/kitty/tab_bar.py" "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}/tab_bar.py"
    ```
 
