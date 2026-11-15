@@ -198,6 +198,33 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(zshrc.read_text().splitlines(), [line])
         self.assertEqual(len(fx.urls()), 2)
 
+    def test_a_failed_download_writes_nothing(self):
+        fx = self.fixture("Darwin", "arm64", "aarch64-apple-darwin")
+        fx._stub("curl", "#!/bin/sh\nexit 22\n")
+        result = fx.run()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(f"{BASE_URL}/wok-aarch64-apple-darwin.tar.gz", result.stderr)
+        self.assertFalse((fx.home / ".local").exists())
+        self.assertFalse((fx.home / ".zshrc").exists())
+
+    def test_a_relative_dir_is_rejected(self):
+        fx = self.fixture("Darwin", "arm64", "aarch64-apple-darwin")
+        result = fx.run("--dir", "bin")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("--dir must be an absolute path", result.stderr)
+        self.assertFalse((fx.home / ".zshrc").exists())
+        self.assertEqual(fx.urls(), [])
+
+    def test_a_dir_already_on_path_leaves_the_profile_alone(self):
+        fx = self.fixture("Darwin", "arm64", "aarch64-apple-darwin")
+        directory = fx.root / "onpath"
+        fx.env["PATH"] = f"{directory}:{fx.env['PATH']}"
+        result = fx.run("--dir", str(directory))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_installed(directory, "one")
+        self.assertIn("already on PATH", result.stdout.splitlines()[2])
+        self.assertFalse((fx.home / ".zshrc").exists())
+
     def test_install_script_names_no_package_manager_or_privilege_escalation(self):
         text = SCRIPT.read_text().lower()
         for word in ("python", "pip", "brew", "apt", "sudo"):

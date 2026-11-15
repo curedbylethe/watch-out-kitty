@@ -19,6 +19,13 @@ while [ $# -gt 0 ]; do
 			exit 1
 		fi
 		dir=$2
+		case $dir in
+		/*) ;;
+		*)
+			printf 'install.sh: --dir must be an absolute path\n' >&2
+			exit 1
+			;;
+		esac
 		shift 2
 		;;
 	*)
@@ -54,7 +61,8 @@ fi
 
 url="https://github.com/curedbylethe/watch-out-kitty/releases/latest/download/wok-$target.tar.gz"
 work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT INT TERM
+trap 'rm -rf "$work"' EXIT
+trap 'exit 1' INT TERM
 archive=$work/wok-$target.tar.gz
 
 if ! curl -fsSL --proto '=https' -o "$archive" "$url"; then
@@ -63,7 +71,7 @@ if ! curl -fsSL --proto '=https' -o "$archive" "$url"; then
 fi
 
 mkdir "$work/extract"
-tar -xzf "$archive" -C "$work/extract" || exit 1
+tar -xzf "$archive" -C "$work/extract"
 for name in wok wok-daemon; do
 	if [ ! -f "$work/extract/$name" ]; then
 		printf 'install.sh: %s is missing from %s\n' "$name" "$url" >&2
@@ -73,13 +81,16 @@ done
 
 mkdir -p "$dir"
 for name in wok wok-daemon; do
-	# A running executable cannot be overwritten in place on Linux (ETXTBSY).
-	rm -f "$dir/$name"
-	cp "$work/extract/$name" "$dir/$name"
-	chmod 755 "$dir/$name"
+	# mv replaces a running binary, which rm then cp cannot (ETXTBSY on Linux).
+	cp "$work/extract/$name" "$dir/$name.new"
+	chmod 755 "$dir/$name.new"
+	mv -f "$dir/$name.new" "$dir/$name"
 done
 
 line='export PATH="'"$dir"':$PATH"'
+
+on_path=
+case ":${PATH:-}:" in *":$dir:"*) on_path=1 ;; esac
 
 profile=
 if [ -n "${HOME:-}" ]; then
@@ -96,7 +107,9 @@ if [ -n "${HOME:-}" ]; then
 	esac
 fi
 
-if [ -n "$profile" ]; then
+if [ -n "$on_path" ]; then
+	path_note="$dir is already on PATH"
+elif [ -n "$profile" ]; then
 	if grep -qF "$line" "$profile" 2>/dev/null; then
 		path_note="PATH already includes $dir in $profile"
 	elif [ -d "${profile%/*}" ] && (printf '%s\n' "$line" >>"$profile") 2>/dev/null; then
