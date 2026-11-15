@@ -25,8 +25,8 @@ fn daemon_socket_lifecycle_uses_cached_protocol_and_cleans_up_on_sigterm() {
     );
 
     let second = Command::new(env!("CARGO_BIN_EXE_wok-daemon"))
-        .env("SYSWATCH_SOCKET", &socket)
-        .env("SYSWATCH_DISABLE_UPDATE_CHECK", "1")
+        .env("WOK_SOCKET", &socket)
+        .env("WOK_DISABLE_UPDATE_CHECK", "1")
         .output()
         .unwrap();
     assert!(!second.status.success());

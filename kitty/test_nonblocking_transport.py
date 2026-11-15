@@ -105,13 +105,13 @@ class NonblockingRequestTest(unittest.TestCase):
         self.assertEqual(result.value.process_count, 3)
 
     def test_unset_socket_path_resolves_from_the_environment(self):
-        with mock.patch.dict(os.environ, {"SYSWATCH_SOCKET": self.daemon.path}):
+        with mock.patch.dict(os.environ, {"WOK_SOCKET": self.daemon.path}):
             req = NonblockingRequest("status", None, FAR, lambda: NOW, None)
             self.assertIsNotNone(drive_until_connected(req, self.daemon))
             self.assertEqual(req._socket_path, self.daemon.path)
 
     def test_relative_socket_path_from_the_environment_is_invalid(self):
-        with mock.patch.dict(os.environ, {"SYSWATCH_SOCKET": "relative.sock"}):
+        with mock.patch.dict(os.environ, {"WOK_SOCKET": "relative.sock"}):
             req = NonblockingRequest("status", None, FAR, lambda: NOW, None)
             result = req.advance(0)
             self.assertEqual((result.state, result.reason), ("socket_path_invalid", "relative_path"))

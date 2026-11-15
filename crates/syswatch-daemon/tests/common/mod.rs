@@ -147,9 +147,9 @@ pub fn poll(
 
 pub fn spawn_daemon(socket: &Path) -> io::Result<Child> {
     Command::new(env!("CARGO_BIN_EXE_wok-daemon"))
-        .env("SYSWATCH_SOCKET", socket)
+        .env("WOK_SOCKET", socket)
         // The gate stays offline: no daemon under test performs a release check.
-        .env("SYSWATCH_DISABLE_UPDATE_CHECK", "1")
+        .env("WOK_DISABLE_UPDATE_CHECK", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -268,7 +268,7 @@ pub fn file_identity(path: &Path) -> Option<(u64, u64)> {
 pub fn run_cli(socket: &Path, args: &[&str]) -> Output {
     let child = Command::new(cli_binary())
         .args(args)
-        .env("SYSWATCH_SOCKET", socket)
+        .env("WOK_SOCKET", socket)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

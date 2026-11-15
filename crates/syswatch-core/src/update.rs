@@ -17,10 +17,10 @@ pub const UPDATE_FEED_URL: &str =
     "https://api.github.com/repos/curedbylethe/watch-out-kitty/releases/latest";
 
 /// Set to any non-empty value to disable the update check.
-pub const UPDATE_DISABLE_ENV: &str = "SYSWATCH_DISABLE_UPDATE_CHECK";
+pub const UPDATE_DISABLE_ENV: &str = "WOK_DISABLE_UPDATE_CHECK";
 
 /// Absolute path override for the update state file.
-pub const UPDATE_STATE_ENV: &str = "SYSWATCH_UPDATE_STATE";
+pub const UPDATE_STATE_ENV: &str = "WOK_UPDATE_STATE";
 
 /// File name of the update state file.
 pub const UPDATE_STATE_FILE_NAME: &str = "update.json";
@@ -160,7 +160,7 @@ impl fmt::Display for StatePathError {
         match self {
             Self::NotConfigured => write!(
                 f,
-                "no update state path configured; set SYSWATCH_UPDATE_STATE to an absolute path, or XDG_STATE_HOME, or HOME"
+                "no update state path configured; set WOK_UPDATE_STATE to an absolute path, or XDG_STATE_HOME, or HOME"
             ),
             Self::RelativePath(path) => {
                 write!(f, "update state path must be absolute: {}", path.display())
@@ -198,16 +198,14 @@ pub fn resolve_state_path(
     if let Some(value) = non_empty(state_home) {
         let path = Path::new(value);
         if path.is_absolute() {
-            return Ok(path.join("syswatch").join(UPDATE_STATE_FILE_NAME));
+            return Ok(path.join("wok").join(UPDATE_STATE_FILE_NAME));
         }
     }
 
     if let Some(value) = non_empty(home) {
         let path = Path::new(value);
         if path.is_absolute() {
-            return Ok(path
-                .join(".local/state/syswatch")
-                .join(UPDATE_STATE_FILE_NAME));
+            return Ok(path.join(".local/state/wok").join(UPDATE_STATE_FILE_NAME));
         }
     }
 
@@ -436,11 +434,11 @@ mod tests {
         );
         assert_eq!(
             resolve_state_path(None, Some(OsStr::new("/state")), Some(OsStr::new("/home"))),
-            Ok(PathBuf::from("/state/syswatch/update.json"))
+            Ok(PathBuf::from("/state/wok/update.json"))
         );
         assert_eq!(
             resolve_state_path(None, None, Some(OsStr::new("/home"))),
-            Ok(PathBuf::from("/home/.local/state/syswatch/update.json"))
+            Ok(PathBuf::from("/home/.local/state/wok/update.json"))
         );
         assert_eq!(
             resolve_state_path(Some(OsStr::new("relative.json")), None, None),
