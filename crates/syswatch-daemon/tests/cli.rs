@@ -93,13 +93,23 @@ fn suggestions_command_reports_a_missing_daemon() {
 fn suggestions_command_prints_usage_for_help() {
     let dir = TempDir::new();
 
-    for spelling in ["--help", "-h", "help"] {
+    for spelling in ["--help", "-h"] {
         let output = run_cli(&socket_path(&dir), &["suggestions", spelling]);
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(output.status.success(), "{spelling}");
         assert!(stdout.contains("suggestions"), "{stdout}");
         assert!(!stdout.contains("--limit") && !stdout.contains("--sort"));
     }
+}
+
+#[test]
+fn suggestions_rejects_the_bare_help_word() {
+    let dir = TempDir::new();
+
+    let output = run_cli(&socket_path(&dir), &["suggestions", "help"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr.contains("Usage: wok <COMMAND>"), "{stderr}");
 }
 
 #[test]
