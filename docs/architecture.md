@@ -12,12 +12,12 @@ rendering, daemon runtime, and CLI frameworks. The workspace uses Rust edition
 ## Update check
 
 The daemon reads the build version from one workspace value and reports it in
-`syswatch --version` and in its startup line. It checks once at startup and then
+`wok --version` and in its startup line. It checks once at startup and then
 once a day whether GitHub publishes a newer release. The check runs on its own
 thread and never delays sampling or a reply. It makes one bounded request with a
 3-second deadline, sends no machine identifier, and stays silent on every
 failure: offline, DNS failure, and rate limiting print nothing and are not
-retried before the next daily check. Set `SYSWATCH_DISABLE_UPDATE_CHECK=1` to
+retried before the next daily check. Set `WOK_DISABLE_UPDATE_CHECK=1` to
 stop the check entirely.
 
 ## Module map
@@ -60,13 +60,13 @@ stop the check entirely.
 | `crates/syswatch-cli/src/client.rs` | Daemon IPC client |
 | `crates/syswatch-cli/src/main.rs` | Command dispatch and process entry point |
 | `crates/syswatch-cli/src/output.rs` | Status, process, and advisory report rendering |
-| `kitty/syswatch_client.py` | Read-only Python client for cached status and suggestions |
-| `kitty/syswatch_cache.py` | In-memory cache of status and suggestions, request scheduler, shared instance |
-| `kitty/syswatch_transport.py` | Nonblocking one-request socket state machine with a whole-request deadline |
-| `kitty/syswatch_refresh.py` | Main-loop timer chain that drives the cache; no threads |
-| `kitty/syswatch_redraw.py` | Tab-bar repaint timer on non-public Kitty symbols, with a fallback |
+| `kitty/wok_client.py` | Read-only Python client for cached status and suggestions |
+| `kitty/wok_cache.py` | In-memory cache of status and suggestions, request scheduler, shared instance |
+| `kitty/wok_transport.py` | Nonblocking one-request socket state machine with a whole-request deadline |
+| `kitty/wok_refresh.py` | Main-loop timer chain that drives the cache; no threads |
+| `kitty/wok_redraw.py` | Tab-bar repaint timer on non-public Kitty symbols, with a fallback |
 | `kitty/tab_bar.py` | Installable Kitty tab bar: Kitty's tab drawing plus the CPU/RAM indicator and advisory marker |
-| `kitty/syswatch_indicator.py` | Indicator and advisory-marker text from the cached view; pure, no I/O |
+| `kitty/wok_indicator.py` | Indicator and advisory-marker text from the cached view; pure, no I/O |
 | `kitty/test_*.py` | Python client tests (`unittest`) |
 | `.github/workflows/ci.yml` | Ubuntu checks: Rust formatting, Clippy, build and tests, and the Python suite |
 | `.github/workflows/release.yml` | Creates a GitHub release with generated notes from a `v*` tag |

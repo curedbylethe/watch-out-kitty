@@ -12,7 +12,7 @@ explanations are shortened to 160 characters. The daemon
 keeps its last successful sample in memory between refreshes. The daemon exposes
 cached samples through the per-user socket described above. Process data can be
 older than aggregate data; the `*_updated_at_ms` fields show sample times.
-`syswatch top` reads the cached process list and does not scan on demand. The
+`wok top` reads the cached process list and does not scan on demand. The
 age line under the table (for example, `process data: 4.2 s old`) shows its age;
 before the first scan it prints `process data: unavailable`. Per-process CPU
 can exceed 100%; nonfinite CPU values render as `n/a`. Rows sort by the selected
@@ -43,7 +43,7 @@ A finding invites inspection.
 
 A finding reference is `<pid>-<start_time_secs>-<kind>`. It names the same `(pid, start_time_secs)`
 identity the rest of the tool uses, so a reference cannot select a process whose PID was reused.
-`syswatch inspect` matches all three fields. A reference absent from the current reply is reported
+`wok inspect` matches all three fields. A reference absent from the current reply is reported
 as not found and may have expired.
 
 The detector considers eligible processes holding at least 256 MiB, with CPU
@@ -55,14 +55,14 @@ Warm-up and invalid CPU samples do not count; genuine zero readings can still
 be cold, so this evidence does not prove idleness. A process whose start time
 is unknown (zero) is not assessed as a candidate, because `(pid, start_time_secs)`
 is the identity and a matching PID or executable name does not establish it.
-This exclusion affects advice only. The `processes` reply and `syswatch top` still
+This exclusion affects advice only. The `processes` reply and `wok top` still
 include the process; the reply keeps its reported `start_time_secs`. Explanations
 omit process names; any renderer adding them must sanitize them as `report.rs`
 does. Findings
 do not claim a process is safe or safe to terminate. The detector does not
 detect orphaned, stale, or abandoned processes and performs no process control.
 The daemon evaluates findings on process-sampling ticks and serves the cached
-result over IPC without recomputing it per request. `syswatch suggestions` prints
+result over IPC without recomputing it per request. `wok suggestions` prints
 the cached findings. The Kitty tab bar shows only their count; see [Advisory badge](../README.md#advisory-badge). A finding describes
 observed evidence and never authorizes a process action.
 
@@ -109,7 +109,7 @@ use, described above, and states that nothing was executed.
 
 ### Requesting a graceful stop
 
-`syswatch close <pid>-<start_time_secs>-<kind>` is the only command that can lead to
+`wok close <pid>-<start_time_secs>-<kind>` is the only command that can lead to
 a signal. The reference is the complete finding identity, as in `inspect`. A PID
 alone, a list number, or an unspecified target is a usage error (exit 2). The
 command has no `--yes`, `--force`, `--all`, or `--kill` option.
@@ -145,7 +145,7 @@ Exit codes:
 
 Output for an accepted request states `signal requested: SIGTERM`, names the process,
 and says that the daemon accepted the request but did not confirm an exit. Run
-`syswatch inspect <reference>` to check again.
+`wok inspect <reference>` to check again.
 
 Failure modes that exit 1: cancellation at the prompt, end of input, non-terminal
 stdin, stale evidence, a finding that is no longer cached, PID reuse, protected
