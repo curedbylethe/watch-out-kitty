@@ -1,6 +1,6 @@
 //! Versioned, transport-agnostic monitoring request and response types.
 //!
-//! Messages use one UTF-8 JSON value per line. See the repository README for
+//! Messages use one UTF-8 JSON value per line. See `docs/protocol.md` for
 //! the wire examples and framing contract.
 
 use serde::de::IntoDeserializer;
