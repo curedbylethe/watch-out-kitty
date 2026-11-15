@@ -183,7 +183,7 @@ dependencies = [
 
 [[package]]
 name = "syswatch-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "syswatch-core",
@@ -191,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "syswatch-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "serde",
@@ -201,7 +201,7 @@ dependencies = [
 
 [[package]]
 name = "syswatch-daemon"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "libc",
  "signal-hook",
