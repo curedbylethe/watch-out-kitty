@@ -1,199 +1,103 @@
 # Watch Out Kitty
 
-Watch Out Kitty is a macOS-first telemetry library and foreground daemon for
-a CPU and RAM indicator in Kitty. Run the example to print one snapshot, or
-run the daemon to keep sampling system usage.
-
-## Run it
-
-Install the Rust stable toolchain, then clone and run the example:
+Watch Out Kitty puts live CPU and memory numbers in the Kitty tab bar on macOS. A foreground daemon samples the system and answers the tab bar and a small command-line client. It also lists processes that hold a lot of memory while idle, and it signals nothing unless you confirm a `close`.
 
 ```sh
 git clone https://github.com/curedbylethe/watch-out-kitty.git
 cd watch-out-kitty
-cargo run -p syswatch-core --example snapshot
-cargo run -p syswatch-daemon
-cargo run -p syswatch-cli -- status
-cargo run -p syswatch-cli -- top
-cargo run -p syswatch-cli -- suggestions
-cargo run -p syswatch-cli -- inspect 42-1700000000-memory
-cargo run -p syswatch-cli -- close 42-1700000000-memory   # needs an interactive terminal
-cargo run -p syswatch-cli -- update dismiss
-cargo run -p syswatch-cli -- --version
+cargo build --workspace
 ```
 
-The example prints one snapshot of aggregate CPU, physical memory, and the
-processes using the most memory, then exits. The daemon runs in the foreground.
-While it runs, `syswatch status` prints the latest CPU, memory, process count,
-and sample ages. It exits with status 1 when the daemon is unavailable or its
-connection times out, protocol version differs, or response is invalid. It
-exits with status 2 for invalid command-line arguments. `syswatch top` prints
-cached process data ranked by memory (default) or CPU. Use `--sort memory|cpu`
-to choose order and `--limit N` to set a positive row limit (default 10).
-`status` and `top` use exit code 1 for runtime errors and 2 for usage errors.
-`close` exits 0 only when the daemon accepted a SIGTERM request; see
-[Requesting a graceful stop](#requesting-a-graceful-stop).
-Ctrl-C (SIGINT) or SIGTERM stops it cleanly, prints `syswatch-daemon: stopped`,
-and exits with status 0. CI currently runs on Ubuntu 24.04.
+## Install
 
-`syswatch suggestions` prints the daemon's cached advisory findings. Each finding
-has a reference (`<pid>-<start_time_secs>-<kind>`), a confidence, the process
-name, and an explanation, followed by the ages of the evaluation and the process
-data. Names are shortened to 24 characters and explanations to 160. The command
-reads cached replies only and never scans processes. Before the daemon has enough
-history it prints `still collecting evidence: …`; when no finding qualifies it
-prints `(no current suggestions)`. Both exit with status 0. Daemon and IPC
-failures exit with status 1, and invalid arguments exit with status 2. The command
-requests no process action; a finding invites inspection or an explicitly
-confirmed `close`.
+You need macOS (tested with Kitty 0.49.2), Python 3.11 or newer with nothing to install, and a Rust stable toolchain. The build writes two binaries into `target/debug`: `syswatch` for commands and `syswatch-daemon` for the sampler. This document uses those names.
 
-`syswatch inspect <reference>` prints the cached evidence for one finding, selected by its full
-reference `<pid>-<start_time_secs>-<kind>`. It exits with status 1 when the daemon is unavailable or
-the finding is no longer cached, and with status 2 for a malformed reference. It reads cached replies
-only and never scans processes.
+1. Clone the repository and build the workspace: `git clone https://github.com/curedbylethe/watch-out-kitty.git`, then `cd watch-out-kitty` and `cargo build --workspace`. The binaries land in `target/debug`, so add it to the PATH of the shells you use: `export PATH="$PWD/target/debug:$PATH"`.
+2. Link the adapter as `tab_bar.py` into the directory that holds the `kitty.conf` Kitty loads. Kitty uses `$KITTY_CONFIG_DIRECTORY` when set; otherwise the first existing file of `$XDG_CONFIG_HOME/kitty/kitty.conf`, `~/.config/kitty/kitty.conf`, `~/Library/Preferences/kitty/kitty.conf` and `$XDG_CONFIG_DIRS/kitty/kitty.conf`. The command below assumes `~/.config/kitty`; if your loaded `kitty.conf` is elsewhere, use that directory. Kitty's `edit_config_file` action (⌘, on macOS) shows the path.
 
-`syswatch close <reference>` previews one finding and, only after you type `yes`, asks the
-daemon to request one SIGTERM. See [Requesting a graceful stop](#requesting-a-graceful-stop).
+   ```sh
+   ln -s "$PWD/kitty/tab_bar.py" "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}/tab_bar.py"
+   ```
 
-`syswatch update dismiss` silences the current update notice. It prints
-`dismissed update notice for 1.2.3` and exits 0, or prints `no update to dismiss`
-and exits 0 when the daemon reports no newer release; that case writes nothing.
-A state path that cannot be resolved or written exits 1. See [Upgrade](#upgrade).
+   Use a symlink, not a copy: the file finds the adapter modules next to its real path. If `ln` reports `File exists`, read [If you already have a tab_bar.py](#if-you-already-have-a-tab_barpy).
+3. Set the three options below in `kitty.conf`.
+4. Start the daemon in a terminal other than the Kitty window you restart, then restart Kitty. Kitty loads `tab_bar.py` once, so a restart is needed after each change.
 
-`syswatch --version` prints the build version, for example `syswatch 0.1.0`, and
-exits 0. Every crate reads one workspace version, so the daemon banner, the
-protocol reply, and this output agree. `-V` and `version` are accepted too; any
-further argument exits 2.
+Options for `kitty.conf`:
 
-When the daemon has found a newer release, `syswatch status` adds one line:
-`update available: 1.2.3 - syswatch update dismiss to stop notices (https://…)`.
+```conf
+tab_bar_style custom
+tab_bar_edge top
+tab_bar_min_tabs 1
+```
 
-### Daemon socket
+- `tab_bar_style custom` (default `fade`): required. Kitty then calls `draw_tab` in `tab_bar.py`. Tabs keep Kitty's fade look and your `tab_title_template`. Any other style (`powerline`, `slant`, `separator`, `hidden`) falls back to the fade look.
+- `tab_bar_edge top` (default `bottom`): optional. The indicator works on `top` and `bottom`. `top` moves the bar, and the windows start one row lower. On `left` or `right`, tabs draw normally and the indicator is not shown.
+- `tab_bar_min_tabs 1` (default `2`): shows the bar, and so the indicator, with a single tab. With the default, both stay hidden until a second tab opens.
 
-The daemon socket path is `$SYSWATCH_SOCKET` when set to an absolute path,
-otherwise `$XDG_RUNTIME_DIR/syswatch.sock`, otherwise
-`$HOME/.local/run/syswatch.sock`. The daemon creates a missing final directory
-with mode `0700` and refuses directories accessible by other users. The socket
-has mode `0600`. The daemon does not listen on TCP. A client sends one JSON
-request line per connection; the server closes the connection after its reply.
+### Limits
 
-## Current scope
+- If the whole text does not fit, or the tabs overflow the bar, the whole indicator is hidden. It is never truncated.
+- `tab_bar_align` must stay `start` (the default); `center` and `end` shift the finished line and can clip the text.
+- The indicator is not clickable.
 
-This repository contains the telemetry crate, snapshot example, foreground
-daemon, and `syswatch status`, `syswatch top`, `syswatch suggestions`, `syswatch inspect`,
-`syswatch close`, `syswatch update dismiss`, and `syswatch --version`
-commands. `syswatch close` is the only command that can request a process action. The daemon evaluates advisory findings on process-sampling ticks,
-caches them separately from aggregate telemetry, and serves them through the
-read-only `suggestions` request. A Kitty tab bar shows CPU and RAM and a passive
-count of the current findings; it shows no finding details. The daemon also
-checks once at startup and then once a day for a newer published release, and
-reports one in its status reply; it sends no signal and starts no process
-action. A background
-service is planned. See the
-[issue tracker](https://github.com/curedbylethe/watch-out-kitty/issues) for
-planned work and [issue #13](https://github.com/curedbylethe/watch-out-kitty/issues/13)
-for contributor guidance.
+### If you already have a tab_bar.py
 
-## Development
+Kitty loads one `tab_bar.py` per config directory, and nothing is merged automatically. If you already have one, do not delete or replace it. Choose one of these cases:
 
-The workspace uses Rust edition 2024. From the repository root:
+- **No `tab_bar.py` yet.** Use the link from step 2. Keep your customization in `tab_title_template`; the adapter keeps it.
+- **Your `tab_bar.py` must stay as it is.** Do not install this adapter.
+- **Your `tab_bar.py` must keep drawing the tabs.** Do not install this adapter over it; it does not compose with a custom `tab_bar.py`.
+
+## Use
+
+Start the daemon:
 
 ```sh
-cargo build --workspace
-cargo test --workspace
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-python3 -m unittest discover -s kitty -t kitty -p 'test_*.py'
+syswatch-daemon
 ```
 
-`cargo test --workspace` also runs the end-to-end daemon and socket tests; they spawn isolated daemon processes in temporary directories and require no running daemon.
+It runs in the foreground. Ctrl-C or SIGTERM stops it cleanly and prints `syswatch-daemon: stopped`.
 
-The Python suite uses the standard library only and needs no Kitty session. Behavior that needs a real Kitty window is checked by hand, not by the suite.
+```sh
+syswatch status
+syswatch top --sort memory --limit 10
+syswatch suggestions
+syswatch inspect <reference>
+syswatch close <reference>
+syswatch update dismiss
+syswatch --version
+```
 
-### Manual Kitty integration checklist
+- `status` prints the latest CPU, memory, process count and sample ages.
+- `top` prints cached processes ranked by memory (the default) or CPU. `--sort memory|cpu` picks the key and `--limit N` sets a positive row limit, 10 by default.
+- `suggestions` prints the daemon's cached advisory findings: a reference, confidence, process name and explanation, then the ages of the evaluation and the process data. Before there is enough history it prints `still collecting evidence: …`; with nothing to report it prints `(no current suggestions)`.
+- `inspect <reference>` prints the cached evidence for one finding, selected by its full reference `<pid>-<start_time_secs>-<kind>`.
+- `close <reference>` previews one finding and, only after you type `yes`, asks the daemon to request one SIGTERM. See [Closing a process](#closing-a-process).
+- `update dismiss` silences the current update notice. It prints `dismissed update notice for 1.2.3`, or `no update to dismiss` when the daemon reports no newer release.
+- `--version` prints the build version, for example `syswatch 0.1.0`.
 
-The suite cannot reach a real Kitty window. Run these checks in order, in a macOS Kitty session with the [Install](#install) steps done. Each item states what you should see.
+`syswatch --help` lists the commands, and `syswatch top --help` spells out its flags.
 
-1. Fresh install, no existing `tab_bar.py`, `tab_bar_min_tabs 1`, one tab: after a restart the bar shows `CPU n%  RAM n%` at the right edge.
-2. Set `tab_bar_min_tabs` back to the default `2` (or remove the line) and restart: with one tab the bar and indicator are hidden; open a second tab and both appear.
-3. Ten or more tabs: every title is readable and none is overwritten. The indicator is at the right edge or hidden, as the limits in [Kitty tab bar](#kitty-tab-bar) describe.
-4. Narrow the window until the indicator disappears: the tabs still draw. Widen it: the indicator returns.
-5. `tab_bar_edge top`, then `bottom`: the indicator is present on both. `left` or `right`: the tabs draw and no indicator appears.
-6. Kitty follows the macOS appearance only when its config directory holds `dark-theme.auto.conf` or `light-theme.auto.conf` (see Kitty's themes kitten). If neither file exists, switch Kitty's theme yourself: run `kitty +kitten themes`, choose a dark theme, restart Kitty, then choose a light theme and restart again. If the files exist, switch the macOS appearance and restart Kitty in each mode. Either way the text stays readable in both, with no fixed color.
-7. No daemon running: the indicator shows `syswatch offline`.
-8. Start `syswatch-daemon`: the indicator shows `CPU --  RAM --`, then numbers. `cargo run -q -p syswatch-cli -- status` shows the same values.
-9. Leave one window idle for several minutes: the numbers keep changing. If they change only when you interact, record that as the repaint fallback. [Issue #80](https://github.com/curedbylethe/watch-out-kitty/issues/80) tracks this check; run it here once and do not file a duplicate.
-10. Stop the daemon while Kitty runs: the indicator shows `syswatch offline` without a restart. Start the daemon again: the numbers return.
-11. With a current finding, the marker shows `!N`. After the finding clears, the marker disappears. With the daemon down, no marker appears beside `syswatch offline`. A finding needs a process that holds at least 256 MiB, uses at most 1% CPU, and is not started from a terminal, so `yes > /dev/null` never produces one. Start a process from launchd that holds memory and sleeps, and wait about 2–3 minutes:
+Exit status is `0` for success, `1` for a runtime failure such as a missing daemon, and `2` for a usage error.
 
-    ```sh
-    cat > "${TMPDIR:-/tmp}/syswatch-hold.py" <<'EOF'
-    import ctypes, mmap, time
-    size = 300 * 1024 * 1024
-    m = mmap.mmap(-1, size)
-    addr = ctypes.addressof(ctypes.c_char.from_buffer(m))
-    if ctypes.CDLL(None).mlock(ctypes.c_void_p(addr), ctypes.c_size_t(size)) != 0:
-        raise SystemExit("mlock failed")
-    for i in range(0, size, 4096):
-        m[i] = 1
-    time.sleep(3600)
-    EOF
-    launchctl submit -l syswatch.test -- python3 "${TMPDIR:-/tmp}/syswatch-hold.py"
-    cargo run -q -p syswatch-cli -- suggestions   # expect a memory finding for Python
-    ```
+`status` shows `warming up` before the first CPU sample and `not yet sampled` before the first process scan.
 
-    Check that the marker reads `!1`. When you finish, run `launchctl remove syswatch.test`. If `launchctl list syswatch.test` shows a non-zero `LastExitStatus`, the script stopped and printed nothing: run the `python3` line above in a terminal to see the error, then stop it with Ctrl-C. If `suggestions` still reports no finding after 5 minutes, record the item as failed with that output.
-12. Start the daemon when a published release is newer than your build: the terminal prints one line, `syswatch-daemon: version 0.2.0 is available at https://…; set SYSWATCH_DISABLE_UPDATE_CHECK=1 to silence`, and the tab bar ends with one caret, for example `CPU 18%  RAM 42%  !2 ^`. No release exists yet, so record this item as pending the first tag.
-13. `cargo run -q -p syswatch-cli -- status` shows the same release on one line. Run `cargo run -q -p syswatch-cli -- update dismiss`: it prints `dismissed update notice for 0.2.0`. The next `status` shows no notice, and the caret leaves the tab bar within one sampling interval. Restart the daemon: both stay gone.
-14. Stop the daemon and start it with `SYSWATCH_DISABLE_UPDATE_CHECK=1`: the terminal prints nothing about a release, the tab bar never gains a caret, and `status` never carries the notice line.
-15. Disconnect the network and restart the daemon with the check enabled: no error line appears, and nothing retries before the next daily check.
-16. Remove the integration by the [Removal](#removal) steps. After the Kitty restart the bar has its previous appearance.
+The daemon and the tab bar must resolve the same socket path: `$SYSWATCH_SOCKET` when set to an absolute path, otherwise `$XDG_RUNTIME_DIR/syswatch.sock`, otherwise `$HOME/.local/run/syswatch.sock`.
 
-Record each item as pass, fail, or skipped with the reason, with the Kitty and macOS versions, in the pull request. A failed item is a documentation change or a code bug; do not change the checklist to match a failure.
+Every command reads the daemon's cached replies; none of them scans processes on demand.
 
-### Python client
+### What the tab bar shows
 
-`kitty/syswatch_client.py` reads the daemon's cached status and suggestions for Kitty integration code. It needs Python 3.11 or newer and the standard library only. Add the `kitty/` directory to `sys.path`, then `import syswatch_client`.
+The bar shows `CPU 18%  RAM 42%` at the right edge of the tab bar.
 
-The client sends one `status` or `suggestions` request per call over the socket described in [Daemon socket](#daemon-socket). It never sends `processes` or a close request, opens no TCP connection, runs no shell command, polls no OS metric, and writes nothing to disk.
-
-- `read_status(socket_path=None, *, timeout_ms=1000, now_ms=None, max_age_ms=None)` returns a `ClientResult`.
-- `read_suggestions(...)` takes the same arguments and returns a `ClientResult`.
-
-`ClientResult.state` is one of `available`, `warming_up`, `stale`, `daemon_unavailable`, `timeout`, `permission_denied`, `socket_path_invalid`, `protocol_mismatch`, `malformed_response`, or `daemon_error`. Expected failures return a state and never raise. Only `available` and `stale` carry `value`; a `stale` result keeps its value so a caller can show how old it is.
-
-The client sets no freshness threshold. With `max_age_ms=None`, `age_ms` reports the age and the state is never `stale`. With an integer, the state is `stale` when the primary timestamp is older than that many milliseconds: `aggregate.timestamp_ms` for status, `evaluated_at_ms` for suggestions.
-
-Run its suite from the repository root with the command in [Development](#development).
-
-### Kitty cache and refresh
-
-`kitty/syswatch_cache.py` keeps the latest `status` and `suggestions` results in memory for Kitty drawing code. `TelemetryCache.view()` reads one immutable snapshot and never does I/O, so a tab-bar `draw_tab` can call it directly.
-
-- Refresh intervals: `status` every 1000 ms and `suggestions` every 5000 ms by default. A shorter interval raises `ValueError`. The daemon samples at 1 s and 5 s, so actual refresh periods are about one second for `status` and about five seconds for `suggestions`, plus scan time.
-- Staleness: a channel is `stale` three intervals after its data was produced (3000 ms for `status`, 15000 ms for `suggestions`). The check runs at read time, so a stopped refresh cannot present old data as live.
-- Failures: a failed fetch clears `value`. The last good value stays in `last_value` with `last_age_ms`.
-- States: `not_refreshed` before the first fetch, then each `ClientResult.state`. `warming_up` is normal for `suggestions` for about the first two minutes after the daemon starts.
-- Driver: `install_refresh_timer(cache)` runs one chain of one-shot Kitty main-loop timers. It starts no threads. Each step starts at most one nonblocking socket request and advances it without waiting. A request has a 250 ms deadline. A failed request backs off from 1 s to 10 s. `get_shared()` returns the process-wide cache, and `stop_refresh_timer()` stops the chain.
-
-`kitty/syswatch_redraw.py` repaints the tab bar when the drawn state changes: a new cache revision, or a channel turning `stale` while no new reply arrives. It uses four Kitty symbols that are not public API: `kitty.fast_data_types.add_timer`, `kitty.fast_data_types.wakeup_main_loop`, `kitty.boss.get_boss().os_window_map`, and `TabManager.mark_tab_bar_dirty()`. Kitty 0.49.2 provides them. On that version `mark_tab_bar_dirty()` only marks the bar; it does not wake Kitty's render loop, so an idle window would not repaint. The shim calls `wakeup_main_loop()` once per change to request that repaint. `install_redraw_timer()` checks the symbols and returns `False` if any is missing or fails. Then the bar updates only when Kitty redraws it for its own reasons, such as a tab change, focus change, or title change, and the data can be older than the polling interval. After a Kitty upgrade, check that the indicator still updates on an idle window. [Issue #80](https://github.com/curedbylethe/watch-out-kitty/issues/80) tracks a repeatable upgrade check, and [issue #78](https://github.com/curedbylethe/watch-out-kitty/issues/78) tracks dropping this workaround when Kitty offers a public repaint call.
-
-Kitty does not render a hidden, minimized, or fully covered window. A change made while the window is not visible is drawn when the window becomes visible again.
-
-### Kitty tab bar
-
-`kitty/tab_bar.py` draws the tabs with Kitty's own code and shows `CPU 18%  RAM 42%` at the right edge of the tab bar. The text comes from the cached view; the drawing path does no I/O.
-
-- Values: whole percent, rounded half-up and clamped to 0-100. RAM is occupied physical RAM as a share of total RAM.
 - `CPU --  RAM --`: before the first reply, and while the daemon warms up.
 - `CPU --`: while the first CPU sample is not ready.
 - `RAM --`: the daemon reported no total memory.
-- `~` before each value: the data is stale (older than 3 s).
+- `~` before a value: the data is stale.
 - `syswatch offline`: the daemon cannot be reached or replies with an error.
 
-A dash is not a measurement.
-
-No value appears until `syswatch-daemon` is running; the tab bar reads its cached replies and starts nothing. Polling starts with the first bar draw, so with the default `tab_bar_min_tabs 2` it begins when a second tab opens. Until the first reply, the bar shows `CPU --  RAM --`. The advisory marker shows `!?` while the advisory list has no answer yet, which lasts about two minutes after a daemon start; see [Kitty cache and refresh](#kitty-cache-and-refresh).
+A dash is not a measurement. No value appears until `syswatch-daemon` is running; the tab bar reads cached replies and starts nothing.
 
 #### Advisory badge
 
@@ -212,11 +116,9 @@ The tab bar adds a marker after the status text, two spaces apart: `CPU 18%  RAM
 
 A caret after the marker means the daemon found a newer release: `CPU 18%  RAM 42%  !2 ^`. It is one space after the advisory marker, or two spaces after the values when there is no marker. It needs a status reply, so it never appears beside `syswatch offline`. See [Upgrade](#upgrade).
 
-The marker is passive. It never opens a popup or notification, sends a signal, dismisses a finding, or runs `syswatch close`. It shows a count and a state only, never a process name, path, argument, explanation, or finding reference. No command in this tool dismisses a finding, so the marker changes only when the served list changes. The marker is not clickable; use the keyboard mappings below.
+The marker is passive. It never opens a popup or notification, sends a signal, dismisses a finding, or runs `syswatch close`. It shows a count and a state only, never a process name, path, argument, explanation, or finding reference. No command dismisses a finding, so the marker changes only when the served list changes. The marker is not clickable; use the keyboard mappings below.
 
-If the whole text does not fit, the whole indicator is hidden; the marker is never cut off on its own. The last tab's title is shortened with Kitty's `…` to leave room for the widest text, `CPU ~100%  RAM ~100%  !~64`, but only when at least nine columns remain for the title. That room stays reserved while no marker is shown. If the title cannot be shortened, the indicator is hidden rather than drawn over the title.
-
-#### Keyboard shortcuts for advisory findings
+### Keyboard shortcuts
 
 These optional mappings open the advisory output from the keyboard. No key is bound by default. Add them to `kitty.conf`:
 
@@ -235,119 +137,46 @@ Neither key touches a process. Neither mapping sends a signal or runs `syswatch 
 
 `launch` does not run a login shell, so `syswatch` must be on the PATH that Kitty inherits. If it is not, replace `syswatch` in both lines with the binary's absolute path, for example `/path/to/syswatch`.
 
-#### Install
+### Closing a process
 
-What you need:
+`syswatch close <reference>` is the only command that can lead to a signal. It previews the finding first and needs an interactive terminal. Only the exact line `yes` continues; empty input, end of input, `y`, `YES` and padded input abort and send nothing. A refused preview prints `nothing was executed; no signal was sent`.
 
-- macOS, the primary platform. Tested with Kitty 0.49.2. The indicator does not check your version: it probes four non-public Kitty symbols at startup and falls back to Kitty-driven repaints when any is missing.
-- Python 3.11 or newer, standard library only. Nothing to install. CI runs the suite on Python 3.15.
-- Rust stable toolchain. The workspace uses edition 2024; no numeric rustc version is set.
-- The daemon, started from the repository root with `cargo run -p syswatch-daemon`. It runs in the foreground. No service unit or background installer is provided.
-- The socket: the adapter resolves the path from `SYSWATCH_SOCKET`, `XDG_RUNTIME_DIR` and `HOME`, in the order given in [Daemon socket](#daemon-socket). It creates neither the directory nor the socket; the daemon does.
+The daemon revalidates the process at delivery and requests at most one SIGTERM. It never sends SIGKILL, retries, escalates, or acts on several processes. `close` exits `0` only when the daemon accepted a SIGTERM request, `1` when it aborted, denied, failed, or could not reach the daemon, and `2` for a usage error.
 
-Steps:
+A requested signal is not a confirmed exit: the kernel delivers it to whichever process holds the PID at that moment. Run `syswatch inspect <reference>` to check again.
 
-1. Clone the repository and build the workspace:
+## Upgrade
 
-   ```sh
-   git clone https://github.com/curedbylethe/watch-out-kitty.git
-   cd watch-out-kitty
-   cargo build --workspace
-   ```
-
-2. Link the adapter as `tab_bar.py` into the directory that holds the `kitty.conf` Kitty loads. Kitty uses `$KITTY_CONFIG_DIRECTORY` when set; otherwise it uses the first existing file of `$XDG_CONFIG_HOME/kitty/kitty.conf`, `~/.config/kitty/kitty.conf`, `~/Library/Preferences/kitty/kitty.conf` and `$XDG_CONFIG_DIRS/kitty/kitty.conf`. The command below assumes `~/.config/kitty`; if your loaded `kitty.conf` is elsewhere, use that directory. Kitty's `edit_config_file` action (⌘, on macOS) shows the path. Kitty reads these variables; the adapter does not.
-
-   ```sh
-   ln -s "$PWD/kitty/tab_bar.py" "${KITTY_CONFIG_DIRECTORY:-$HOME/.config/kitty}/tab_bar.py"
-   ```
-
-   Use a symlink, not a copy: the file finds the adapter modules next to its real path. If `ln` reports `File exists`, read [Existing tab_bar.py](#existing-tab_barpy) before you do anything else.
-
-3. Set the three options shown below in `kitty.conf`.
-4. Start the daemon in a terminal other than the Kitty window you restart, then restart Kitty. The daemon runs in the foreground and stops when its terminal closes. Kitty loads `tab_bar.py` once, so a restart is needed after each change.
-
-Options for `kitty.conf`:
-
-```conf
-tab_bar_style custom
-tab_bar_edge top
-tab_bar_min_tabs 1
-```
-
-- `tab_bar_style custom` (default `fade`): required. Kitty then calls `draw_tab` in `tab_bar.py`. Tabs keep Kitty's fade look and your `tab_title_template`. Another style (`powerline`, `slant`, `separator`, `hidden`) is replaced by the fade look.
-- `tab_bar_edge top` (default `bottom`): optional. The indicator works on `top` and `bottom`. `top` moves the bar, and the windows start one row lower. On `left` or `right`, tabs draw normally and the indicator is not shown.
-- `tab_bar_min_tabs 1` (default `2`): shows the bar, and so the indicator, with a single tab. With the default, the bar and the indicator stay hidden until a second tab opens.
-
-Limits:
-
-- The last tab's title is shortened with Kitty's `…` to leave room for the widest text, including an advisory marker and an update caret, plus one free column, and only when at least nine columns remain for the title. That widest text is `CPU ~100%  RAM ~100%  !~64 ^`, 28 characters, and the bar reserves 30 columns for it. The indicator is hidden, never truncated, only when there is still no room, for example with many tabs.
-- When tabs overflow the bar, the indicator is hidden.
-- `tab_bar_align` must stay `start` (the default); `center` and `end` shift the finished line and can clip the text.
-- The indicator is not clickable.
-- It uses the theme's inactive tab foreground on the inactive tab background, with no icon font.
-
-#### Upgrade
-
-Releases are tags of the form `vMAJOR.MINOR.PATCH`, for example `v0.2.0`. Pushing
-such a tag makes the release workflow create a GitHub release with notes generated
-from the merged changes. The release is the tag and its notes; no binary is
-attached, so you build from source.
-
-To upgrade:
+Releases are tags of the form `vMAJOR.MINOR.PATCH`, for example `v0.2.0`. The release is the tag and its generated notes; no binary is attached, so you build from source.
 
 ```sh
 git pull
 cargo build --workspace
 ```
 
-Then stop the daemon with Ctrl-C and start it again. Kitty needs no restart
-unless the adapter files changed.
-
-The daemon reads the build version from one workspace value and reports it in
-`syswatch --version` and in its startup line. It checks once at startup and then
-once a day whether GitHub publishes a newer release. The check runs on its own
-thread and never delays sampling or a reply. It makes one bounded request with a
-3-second deadline, sends no machine identifier, and stays silent on every
-failure: offline, DNS failure, and rate limiting print nothing and are not
-retried before the next daily check. Set `SYSWATCH_DISABLE_UPDATE_CHECK=1` to
-stop the check entirely.
+Then stop the daemon with Ctrl-C and start it again. Kitty needs no restart unless the adapter files changed.
 
 A newer release appears in three places:
 
-- The daemon prints one line at the terminal:
-  `syswatch-daemon: version 0.2.0 is available at https://…; set SYSWATCH_DISABLE_UPDATE_CHECK=1 to silence`.
-- `syswatch status` adds one line naming the version and the release URL. The
-  line suggests `syswatch update dismiss`.
-- The tab bar ends with one caret: `CPU 18%  RAM 42% ^`, or
-  `CPU 18%  RAM 42%  !2 ^` beside an advisory badge. The caret is passive; it
-  opens nothing and sends no signal.
+- The daemon prints one line at the terminal: `syswatch-daemon: version 0.2.0 is available at https://…; set SYSWATCH_DISABLE_UPDATE_CHECK=1 to silence`.
+- `syswatch status` adds one line naming the version and the release URL. The line suggests `syswatch update dismiss`.
+- The tab bar ends with one caret: `CPU 18%  RAM 42% ^`, or `CPU 18%  RAM 42%  !2 ^` beside an advisory badge. The caret is passive; it opens nothing and sends no signal.
 
-Each version prompts at most once. `syswatch update dismiss` records the noticed
-version in a one-key file: `$SYSWATCH_UPDATE_STATE` when set to an absolute path,
-otherwise `$XDG_STATE_HOME/syswatch/update.json`, otherwise
-`~/.local/state/syswatch/update.json`. The file holds only the version. A
-dismissal survives a daemon restart and hides the notice until a newer release
-appears; then the notice returns. Remove the file to restore the notice.
+Set `SYSWATCH_DISABLE_UPDATE_CHECK=1` to stop the check entirely.
 
-#### Existing tab_bar.py
+Each version prompts at most once. `syswatch update dismiss` records the noticed version in a one-key file: `$SYSWATCH_UPDATE_STATE` when set to an absolute path, otherwise `$XDG_STATE_HOME/syswatch/update.json`, otherwise `~/.local/state/syswatch/update.json`. A dismissal survives a daemon restart and hides the notice until a newer release appears; then the notice returns. Remove the file to restore the notice.
 
-Kitty loads one `tab_bar.py` per config directory, and nothing is merged automatically. If you already have one, do not delete or replace it. Choose one of these cases:
-
-- **No `tab_bar.py` yet.** Use the link from step 2. Keep your customization in `tab_title_template`; the adapter keeps it.
-- **Your `tab_bar.py` must stay as it is.** Do not install this adapter.
-- **Your `tab_bar.py` must keep drawing the tabs.** These steps do not cover this case. Do not install this adapter over it; the adapter does not compose with a custom `tab_bar.py`.
-
-#### Troubleshooting
+## Troubleshooting
 
 | Symptom | Check | Fix |
 | :--- | :--- | :--- |
-| No indicator | Kitty's `edit_config_file` action shows the `kitty.conf` Kitty loads. `ls -l` on `tab_bar.py` in that directory shows a link to `kitty/tab_bar.py`, and that `kitty.conf` has the three options | Set the options above, restart Kitty, and widen the window if the title is too long. A regular file under that name is another `tab_bar.py`; see [Existing tab_bar.py](#existing-tab_barpy). |
-| `syswatch offline` | `cargo run -q -p syswatch-cli -- status; echo "exit=$?"` prints `exit=1` when no daemon is running | Start `cargo run -p syswatch-daemon` in a terminal and leave it running. |
-| Socket permission error | `ls -ld` on the socket directory and the socket, using the path from [Daemon socket](#daemon-socket). The directory should be `drwx------` and the socket `srw-------` | Remove other users' access. The daemon and the adapter must resolve the same path, so set `SYSWATCH_SOCKET` to the same absolute path for both. |
-| Stale or frozen numbers | `cargo run -q -p syswatch-cli -- status` prints `Sampled: <age> ago`. A small age with an unchanged indicator means Kitty has not repainted | A large age means the daemon is not sampling; restart it. A small age means an idle window; see [Kitty cache and refresh](#kitty-cache-and-refresh) and check after each Kitty upgrade. |
+| No indicator | Kitty's `edit_config_file` action shows the `kitty.conf` Kitty loads. `ls -l` on `tab_bar.py` in that directory shows a link to `kitty/tab_bar.py`, and that `kitty.conf` has the three options | Set the options above, restart Kitty, and widen the window if the title is too long. A regular file under that name is another `tab_bar.py`; see [If you already have a tab_bar.py](#if-you-already-have-a-tab_barpy). |
+| `syswatch offline` | `syswatch status; echo "exit=$?"` prints `exit=1` when no daemon is running | Start `syswatch-daemon` in a terminal and leave it running. |
+| Socket permission error | `ls -ld` on the socket directory and the socket shows `drwx------` and `srw-------` | Remove other users' access. The daemon and the adapter must resolve the same path, so set `SYSWATCH_SOCKET` to the same absolute path for both. |
+| Stale or frozen numbers | `syswatch status` prints `Sampled: <age> ago`. A small age with an unchanged indicator means Kitty has not repainted | A large age means the daemon is not sampling; restart it. A small age means the window was idle; the bar catches up on the next redraw. |
 | Changes not applied | Kitty loads `tab_bar.py` once, at startup | Restart Kitty after each change to `kitty.conf` or `tab_bar.py`. |
 
-#### Removal
+## Removal
 
 Reverse the install in this order:
 
@@ -356,301 +185,14 @@ Reverse the install in this order:
 3. Remove the three lines from `kitty.conf`.
 4. Restart Kitty. Removing the link while Kitty runs does not unload the bar until the restart.
 
-The adapter writes no files and keeps its view in memory; the daemon keeps its
-telemetry in memory too. Only `syswatch update dismiss` writes a file, the
-one-key dismissal named in [Upgrade](#upgrade); delete it to restore the notice.
-On a clean stop the daemon removes the socket file. Its directory stays; remove it if you want it gone.
+The daemon keeps its telemetry in memory, and `syswatch update dismiss` is the only command that writes a file. On a clean stop the daemon removes the socket file and leaves its directory.
 
-## Project files
+## Where the rest lives
 
-| Path | Contents |
-| --- | --- |
-| `crates/syswatch-core` | Telemetry library |
-| `crates/syswatch-core/src/collector.rs` | System sampling |
-| `crates/syswatch-core/src/provenance.rs` | Internal process provenance metadata |
-| `crates/syswatch-core/src/config.rs` | Validated monitoring intervals |
-| `crates/syswatch-core/src/detector.rs` | Advisory idle memory detector |
-| `crates/syswatch-core/src/findings.rs` | Advisory findings, evidence, and cached suggestions payload |
-| `crates/syswatch-core/src/eligibility.rs` | Protected-process and ancestry eligibility |
-| `crates/syswatch-core/src/history.rs` | Bounded process observation history |
-| `crates/syswatch-core/src/ipc.rs` | Daemon socket path resolution |
-| `crates/syswatch-core/src/lib.rs` | Public core modules and exports |
-| `crates/syswatch-core/src/snapshot.rs` | CPU, memory, and process data types |
-| `crates/syswatch-core/src/report.rs` | Human-readable formatting |
-| `crates/syswatch-core/src/preflight.rs` | Dry-run process-action assessment and preview |
-| `crates/syswatch-core/src/action.rs` | Typed action service; requests one SIGTERM after a fresh allowed preflight |
-| `crates/syswatch-core/src/alerts.rs` | Alert eligibility policy with a fixed cooldown |
-| `crates/syswatch-core/src/protocol.rs` | Versioned protocol: monitoring requests are read-only; close requests are the only action requests |
-| `crates/syswatch-core/src/update.rs` | Release tag comparison and the one-key dismissal state file |
-| `crates/syswatch-core/examples/snapshot.rs` | One-time snapshot example |
-| `crates/syswatch-daemon` | Foreground monitoring daemon |
-| `crates/syswatch-daemon/src/action.rs` | Daemon close handler: preview and guarded confirmation from the latest scan |
-| `crates/syswatch-daemon/src/clock.rs` | Interruptible monotonic clock |
-| `crates/syswatch-daemon/src/ipc.rs` | Unix socket server |
-| `crates/syswatch-daemon/src/scheduler.rs` | Independent sampling schedule |
-| `crates/syswatch-daemon/src/dismissal.rs` | Bounded in-memory registry of dismissed advisory findings |
-| `crates/syswatch-daemon/src/latest.rs` | Cached latest snapshot and advisory suggestions |
-| `crates/syswatch-daemon/src/lib.rs` | Daemon lifecycle and server startup |
-| `crates/syswatch-daemon/src/main.rs` | Foreground daemon entry point |
-| `crates/syswatch-daemon/src/sampler.rs` | Collector, process history, and advisory evaluation |
-| `crates/syswatch-daemon/src/signals.rs` | SIGINT and SIGTERM handling |
-| `crates/syswatch-daemon/src/update_check.rs` | Detached daily release check and its one-line prompt |
-| `crates/syswatch-daemon/tests` | End-to-end daemon and socket tests |
-| `crates/syswatch-cli` | Status, process-ranking, advisory-inspection, and confirmed-close command-line client |
-| `crates/syswatch-cli/src/args.rs` | Command-line argument parsing |
-| `crates/syswatch-cli/src/client.rs` | Daemon IPC client |
-| `crates/syswatch-cli/src/main.rs` | Command dispatch and process entry point |
-| `crates/syswatch-cli/src/output.rs` | Status, process, and advisory report rendering |
-| `kitty/syswatch_client.py` | Read-only Python client for cached status and suggestions |
-| `kitty/syswatch_cache.py` | In-memory cache of status and suggestions, request scheduler, shared instance |
-| `kitty/syswatch_transport.py` | Nonblocking one-request socket state machine with a whole-request deadline |
-| `kitty/syswatch_refresh.py` | Main-loop timer chain that drives the cache; no threads |
-| `kitty/syswatch_redraw.py` | Tab-bar repaint timer on non-public Kitty symbols, with a fallback |
-| `kitty/tab_bar.py` | Installable Kitty tab bar: Kitty's tab drawing plus the CPU/RAM indicator and advisory marker |
-| `kitty/syswatch_indicator.py` | Indicator and advisory-marker text from the cached view; pure, no I/O |
-| `kitty/test_*.py` | Python client tests (`unittest`) |
-| `.github/workflows/ci.yml` | Ubuntu checks: Rust formatting, Clippy, build and tests, and the Python suite |
-| `.github/workflows/release.yml` | Creates a GitHub release with generated notes from a `v*` tag |
-| `LICENSE` | Apache-2.0 license |
-
-## Reading the measurements
-
-Per-process CPU can exceed 100% when a process uses multiple cores. The first
-CPU sample is not representative. Memory reports occupied physical RAM, not
-macOS memory pressure. All values are point-in-time samples. Process names may
-contain replacement characters and are shortened to 24 characters. The daemon
-keeps its last successful sample in memory between refreshes. The daemon exposes
-cached samples through the per-user socket described above. Process data can be
-older than aggregate data; the `*_updated_at_ms` fields show sample times.
-`syswatch top` reads the cached process list and does not scan on demand. The
-age line under the table (for example, `process data: 4.2 s old`) shows its age;
-before the first scan it prints `process data: unavailable`. Per-process CPU
-can exceed 100%; nonfinite CPU values render as `n/a`. Rows sort by the selected
-key, then by PID and start time.
-
-The collector retains best-effort process provenance keyed by process identity:
-executable path, capped file name of `argv[0]`, numeric owner UID, and parent
-identity. Only the capped `argv[0]` file name is copied into provenance; full
-arguments are not exposed or serialized through snapshots or IPC. Environment
-variables are not collected. Provenance is not part of `ProcessSnapshot` or the
-`processes` response. The daemon keeps each scan's provenance with that scan's
-processes, and preflight reads both from one scan. Provenance never crosses the
-socket.
-
-### Advisory findings
-
-An advisory finding describes a process identity, finding kind, confidence,
-observation time, explanation, and evidence aggregated from retained process
-history samples. Evidence covers sampled CPU and memory activity only.
-
-Confidence describes evidence coverage for the finding's kind. Low means fewer
-than two retained observations support the finding, or no valid measurement
-exists. Medium means at least two observations support the finding, but one or
-more retained observations lack a valid measurement. High means every retained
-observation has a valid measurement and at least two observations are retained.
-Confidence does not say whether a process is stale, safe, or safe to terminate.
-A finding invites inspection.
-
-A finding reference is `<pid>-<start_time_secs>-<kind>`. It names the same `(pid, start_time_secs)`
-identity the rest of the tool uses, so a reference cannot select a process whose PID was reused.
-`syswatch inspect` matches all three fields. A reference absent from the current reply is reported
-as not found and may have expired.
-
-The detector considers eligible processes holding at least 256 MiB, with CPU
-usage at or below 1.0% across at least six valid samples spanning at least
-120 seconds. The latest supporting observation must be no more than 30 seconds
-old. At the default 5-second interval, the 60-observation cap permits about
-295 seconds of retained evidence. The detector reports the observed span.
-Warm-up and invalid CPU samples do not count; genuine zero readings can still
-be cold, so this evidence does not prove idleness. A process whose start time
-is unknown (zero) is not assessed as a candidate, because `(pid, start_time_secs)`
-is the identity and a matching PID or executable name does not establish it.
-This exclusion affects advice only. The `processes` reply and `syswatch top` still
-include the process; the reply keeps its reported `start_time_secs`. Explanations
-omit process names; any renderer adding them must sanitize them as `report.rs`
-does. Findings
-do not claim a process is safe or safe to terminate. The detector does not
-detect orphaned, stale, or abandoned processes and performs no process control.
-The daemon evaluates findings on process-sampling ticks and serves the cached
-result over IPC without recomputing it per request. `syswatch suggestions` prints
-the cached findings. The Kitty tab bar shows only their count; see [Advisory badge](#advisory-badge). A finding describes
-observed evidence and never authorizes a process action.
-
-### Advisory eligibility
-
-Eligibility assessment decides whether a later advisory rule may consider a
-process at all. It has exactly three states: `Protected`, `Eligible`, and
-`Unknown`. Unknown terminal association means evidence is missing, not that a
-process is detached. A zero start time is always `Unknown`, regardless of owner
-or ancestry evidence, because its identity cannot be verified.
-A process's own program label counts as terminal evidence, reported separately
-from ancestor evidence; missing ancestry is not evidence of detachment.
-
-### Process-action preflight
-
-A preflight assesses one requested process action. It takes the full finding
-identity, a fresh process scan with provenance, the monitor's identity, the
-current time, and the caller's maximum observation age. It returns one of three outcomes: allowed for
-confirmation, denied, or needs fresh evidence. A zero start time, a missing or
-reused identity, and every protected, monitor, terminal, ownership, or
-incomplete-evidence result denies.
-
-Passing preflight is not permission. It means only that a later confirmation
-step may be offered. The preflight sends no signal. A separate action service
-in `crates/syswatch-core/src/action.rs` may, on explicit instruction, request
-one SIGTERM after it obtains a fresh allowed preflight result. Immediately
-before the request, it revalidates the identity, existence, and eligibility of
-the process, and that the process belongs to the caller's UID. The caller
-supplies its real UID. A requested signal does not mean the process exited. The kernel
-applies the signal to whichever process holds the PID when the signal is sent;
-macOS has no `pidfd`, so identity-safe signalling is not atomic. Prohibited:
-SIGKILL, escalation, retry, force, sudo, bulk actions, and advisor-triggered
-actions. The preflight performs no lookup of its own. The close requests carry its
-typed result over the socket, and protocol version `1` is unchanged.
-
-The daemon runs preflight itself, on its latest cached scan, which supplies the
-processes, provenance, and monitor identity together. A separate read-only
-provenance reply was rejected. Two requests can read two different scans, and
-matching them would need a scan token and a retry loop. Provenance also stays
-off the socket.
-
-The preview prints the same finding reference that `suggestions` and `inspect`
-use, described above, and states that nothing was executed.
-
-### Requesting a graceful stop
-
-`syswatch close <pid>-<start_time_secs>-<kind>` is the only command that can lead to
-a signal. The reference is the complete finding identity, as in `inspect`. A PID
-alone, a list number, or an unspecified target is a usage error (exit 2). The
-command has no `--yes`, `--force`, `--all`, or `--kill` option.
-
-Flow:
-
-1. Without an interactive terminal on stdin, the command exits 1 before it
-   connects to the daemon.
-2. The daemon runs the preflight on its latest cached scan and returns a preview:
-   the reference, process name, owner UID when known, verdict, reasons,
-   observation age, and the line `nothing was executed; no signal was sent`.
-   Evidence older than two process intervals (10 seconds at the default
-   interval) is stale.
-3. A denied or stale preview ends with `aborted: no action was requested` and
-   exit 1. No prompt appears.
-4. Otherwise the command prints `Type yes to request SIGTERM for <reference>:`.
-   Only the exact line `yes` continues. Empty input, end of input, `y`, `YES`,
-   and padded input abort with exit 1 and send nothing more.
-5. The daemon revalidates the identity, the scan age, the monitor and ancestor
-   protection, and the owner UID at delivery. A reused PID, a changed scan, or
-   protected context denies without a signal. The daemon requests at most one
-   SIGTERM.
-
-A finding that the daemon no longer caches is reported as `not_found`.
-
-Exit codes:
-
-| Exit | Meaning |
-| :--- | :--- |
-| 0 | The daemon accepted a SIGTERM request. This is not confirmed exit. |
-| 1 | Aborted, denied, failed, already exited, not found, unavailable, or a connection or protocol error. |
-| 2 | Usage error. |
-
-Output for an accepted request states `signal requested: SIGTERM`, names the process,
-and says that the daemon accepted the request but did not confirm an exit. Run
-`syswatch inspect <reference>` to check again.
-
-Failure modes that exit 1: cancellation at the prompt, end of input, non-terminal
-stdin, stale evidence, a finding that is no longer cached, PID reuse, protected
-or monitor context, a different owner UID, a permission refusal from the operating
-system, a daemon that is down, and an older daemon that answers
-`unsupported_command`.
-
-Safety limits. The command sends at most one SIGTERM per run. It never sends
-SIGKILL, retries, escalates, uses sudo, or acts on several processes. Background
-sampling, advisory findings, and any Kitty rendering stay read-only. A requested
-signal is not an exit: the kernel applies it to whichever process holds the PID at
-delivery, and macOS has no `pidfd` to close that gap. A dismissed finding can still
-be closed by its full reference; the preview shows its current evidence.
-
-## Protocol
-
-The socket server and command-line client exchange one UTF-8 JSON
-value per line. Each request and reply uses one line with no embedded newline.
-Clients send one request per line and read each reply through its line ending.
-Requests over 4096 bytes are rejected. A transport reader must cap buffered
-input at `MAX_REQUEST_BYTES + 1` bytes while waiting for LF; if no LF appears
-within that bound, it must return `malformed_request`. Lines end with LF only;
-CR is rejected.
-
-Protocol version is `1`. Clients send the version they speak. The server reports
-`unsupported_version` with both version numbers when they differ. Changes to
-required fields, field meanings, or command behavior require a version bump.
-The `suggestions` operation is additive, so the version remains `1`: existing
-fields and command behavior are unchanged, older servers reply
-`unsupported_command`, and older clients never send the request.
-
-A `status` reply also carries `build_version`, and `update` with `latest_version`
-and `url` when the daemon found a newer release. Both are additive: version `1`
-is unchanged, an older daemon omits them, and a reader that does not know them
-ignores them. The fields are informational. They never carry a process action.
-
-`syswatch inspect` reads the same cached reply and adds no request type; a finding reference is not a
-wire field and adds nothing to the reply. `syswatch close` adds two requests, `close_preview`
-and `close_confirm`. Each carries one complete `finding` object and nothing else. Monitoring
-requests reject a `finding` field. The close requests are additive, so the version remains
-`1`; an older daemon answers `unsupported_command`.
-
-The three monitoring requests, the two close requests, and example replies:
-
-```text
-{"version":1,"command":"status"}
-{"version":1,"command":"processes"}
-{"version":1,"command":"suggestions"}
-{"version":1,"command":"close_preview","finding":{"pid":42,"start_time_secs":1700000000,"kind":"memory"}}
-{"version":1,"command":"close_confirm","finding":{"pid":42,"start_time_secs":1700000000,"kind":"memory"}}
-{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":42.5,"cpu_updated_at_ms":1700000000123,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":2,"processes_updated_at_ms":1700000000100,"build_version":"0.1.0"}
-{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":42.5,"cpu_updated_at_ms":1700000000123,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":2,"processes_updated_at_ms":1700000000100,"build_version":"0.1.0","update":{"latest_version":"0.2.0","url":"https://github.com/curedbylethe/watch-out-kitty/releases/tag/v0.2.0"}}
-{"kind":"processes","version":1,"observed_at_ms":1700000000123,"processes_updated_at_ms":1700000000100,"processes":[{"pid":42,"parent_pid":1,"name":"worker","cpu_usage_percent":12.5,"memory_bytes":4096,"start_time_secs":1700000000}]}
-{"kind":"suggestions","version":1,"evaluated_at_ms":7,"processes_updated_at_ms":6,"findings":[]}
-{"kind":"close_preview","version":1,"assessment":{...},"process":{...}}
-{"kind":"close_result","version":1,"outcome":"sigterm_requested"}
-{"kind":"error","version":1,"code":"unsupported_version","message":"unsupported protocol version 2; this server speaks 1"}
-{"kind":"error","version":1,"code":"unsupported_command","message":"unsupported command \"kill\""}
-{"kind":"error","version":1,"code":"malformed_request","message":"request is not a JSON object with integer version and string command"}
-{"kind":"error","version":1,"code":"unavailable","message":"process data has not been collected yet"}
-{"kind":"error","version":1,"code":"unavailable","message":"suggestions are not available until enough process history has been collected"}
-```
-
-Suggestions contain at most 64 findings, sorted by finding identity and then
-observation time. The existing per-user socket permissions apply. A suggestions
-reply contains a list, possibly empty when nothing qualified, or an unavailable
-error before enough history is collected; `findings` is never `null`.
-
-`cpu_updated_at_ms`, `process_count`, and `processes_updated_at_ms` can be
-`null` during warm-up. For example:
-
-```text
-{"kind":"status","version":1,"aggregate":{"timestamp_ms":1700000000123,"cpu_usage_percent":0.0,"cpu_updated_at_ms":null,"memory":{"total_bytes":17179869184,"used_bytes":8589934592}},"process_count":null,"processes_updated_at_ms":null,"build_version":"0.1.0"}
-```
-
-| Error code | Meaning |
-| :--- | :--- |
-| `unsupported_version` | Requested protocol version is not supported. |
-| `unsupported_command` | Request names an unsupported command. |
-| `malformed_request` | Request line is malformed or too large. |
-| `unavailable` | Requested data has not been collected yet. |
-| `not_found` | The finding identity is not among the current advisory findings. |
-
-The transport is local: the owner-only socket (`0600`, inside a `0700` directory) is
-the only access control, with no authentication layer and no remote access. The
-monitoring requests are read-only and take no arguments. The close requests are
-the only process-control operations, and they carry only one finding identity.
-The protocol has no filesystem paths, argv, environment data, history request,
-retained-observation payload, or bulk command.
-A suggestions reply carries finding identity, confidence, timestamps,
-explanation, and aggregate numeric evidence; it contains no process names,
-paths, argv, or environment data. Types live in `syswatch_core::protocol`.
-
-`syswatch status` shows `warming up` before the first CPU sample and `not yet
-sampled` before the first process scan. Displayed ages use the sample times.
+- [Module map and data flow](docs/architecture.md)
+- [Measurement semantics, advisory findings and process actions](docs/measurements.md)
+- [Kitty adapter internals and the manual checklist](docs/kitty-adapter.md)
+- [Socket protocol](docs/protocol.md)
 
 ## License
 
