@@ -55,14 +55,14 @@ fn main() {
     let path = match syswatch_core::ipc::socket_path() {
         Ok(path) => path,
         Err(error) => {
-            eprintln!("syswatch: {error}");
+            eprintln!("wok: {error}");
             std::process::exit(1);
         }
     };
     let response = match client::request(&path, request_command, None, client::TIMEOUT) {
         Ok(response) => response,
         Err(error) => {
-            eprintln!("syswatch: {error}");
+            eprintln!("wok: {error}");
             std::process::exit(1);
         }
     };
@@ -107,7 +107,7 @@ fn main() {
     match rendered {
         Ok(output) => println!("{output}"),
         Err(error) => {
-            eprintln!("syswatch: {error}");
+            eprintln!("wok: {error}");
             std::process::exit(1);
         }
     }
@@ -124,13 +124,13 @@ fn run_close(reference: syswatch_core::findings::FindingId) -> i32 {
     };
 
     if !std::io::stdin().is_terminal() {
-        eprintln!("syswatch: close requires an interactive terminal; no action was requested");
+        eprintln!("wok: close requires an interactive terminal; no action was requested");
         return 1;
     }
     let path = match syswatch_core::ipc::socket_path() {
         Ok(path) => path,
         Err(error) => {
-            eprintln!("syswatch: {error}");
+            eprintln!("wok: {error}");
             return 1;
         }
     };
@@ -142,14 +142,14 @@ fn run_close(reference: syswatch_core::findings::FindingId) -> i32 {
     ) {
         Ok(response) => response,
         Err(error) => {
-            eprintln!("syswatch: {error}");
+            eprintln!("wok: {error}");
             return 1;
         }
     };
     let text = match output::render_close_preview(&preview) {
         Ok(text) => text,
         Err(error) => {
-            eprintln!("syswatch: {error}");
+            eprintln!("wok: {error}");
             return 1;
         }
     };
@@ -166,7 +166,7 @@ fn run_close(reference: syswatch_core::findings::FindingId) -> i32 {
 
     println!();
     println!(
-        "Review the evidence first: syswatch inspect {}",
+        "Review the evidence first: wok inspect {}",
         reference.reference()
     );
     print!(
@@ -197,19 +197,19 @@ fn run_close(reference: syswatch_core::findings::FindingId) -> i32 {
                 code
             }
             Err(error) => {
-                eprintln!("syswatch: {error}");
+                eprintln!("wok: {error}");
                 1
             }
         },
         // Connect and encode fail before any byte is sent, so no hint for them.
         Err(error @ (client::ClientError::Connect(_) | client::ClientError::Encode(_))) => {
-            eprintln!("syswatch: {error}");
+            eprintln!("wok: {error}");
             1
         }
         Err(error) => {
-            eprintln!("syswatch: {error}");
+            eprintln!("wok: {error}");
             eprintln!(
-                "syswatch: the daemon may have received the request; run `syswatch inspect {}` to check",
+                "wok: the daemon may have received the request; run `wok inspect {}` to check",
                 reference.reference()
             );
             1
@@ -381,6 +381,6 @@ mod tests {
 
 #[cfg(not(unix))]
 fn main() {
-    eprintln!("syswatch: unsupported platform");
+    eprintln!("wok: unsupported platform");
     std::process::exit(1);
 }

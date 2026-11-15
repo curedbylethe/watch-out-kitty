@@ -56,7 +56,7 @@ fn update_notice_line(update: Option<&syswatch_core::UpdateNotice>) -> String {
         return String::new();
     };
     let mut line = format!(
-        "\nupdate available: {} - syswatch update dismiss to stop notices",
+        "\nupdate available: {} - wok update dismiss to stop notices",
         report::sanitize_field(&notice.latest_version, 32)
     );
     if !notice.url.is_empty() {
@@ -257,7 +257,7 @@ pub fn render_close_outcome(
     Ok(match outcome {
         ActionOutcome::SigtermRequested => (
             format!(
-                "signal requested: SIGTERM\nprocess: {reference}\nThe daemon accepted the request. This is not confirmation that the process exited.\nRun `syswatch inspect {reference}` to check again."
+                "signal requested: SIGTERM\nprocess: {reference}\nThe daemon accepted the request. This is not confirmation that the process exited.\nRun `wok inspect {reference}` to check again."
             ),
             0,
         ),
@@ -461,7 +461,7 @@ mod tests {
         assert_eq!(
             rendered.lines().last(),
             Some(
-                "update available: 1.2.3 - syswatch update dismiss to stop notices (https://example.invalid/releases/v1.2.3)"
+                "update available: 1.2.3 - wok update dismiss to stop notices (https://example.invalid/releases/v1.2.3)"
             )
         );
         assert_eq!(rendered.matches("update available").count(), 1);
@@ -475,7 +475,7 @@ mod tests {
         }
         assert_eq!(
             render_status(&url_less, 1).unwrap().lines().last(),
-            Some("update available: 2.0.0 - syswatch update dismiss to stop notices")
+            Some("update available: 2.0.0 - wok update dismiss to stop notices")
         );
     }
 
@@ -990,7 +990,7 @@ mod tests {
         assert_eq!(code, 0);
         assert_eq!(
             text,
-            "signal requested: SIGTERM\nprocess: 42-1-cpu\nThe daemon accepted the request. This is not confirmation that the process exited.\nRun `syswatch inspect 42-1-cpu` to check again."
+            "signal requested: SIGTERM\nprocess: 42-1-cpu\nThe daemon accepted the request. This is not confirmation that the process exited.\nRun `wok inspect 42-1-cpu` to check again."
         );
     }
 

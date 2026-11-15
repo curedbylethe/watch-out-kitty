@@ -14,7 +14,7 @@ fn status_line() -> String {
 }
 
 fn failed_daemon_output(socket: &std::path::Path) -> Output {
-    let child = spawn_daemon(socket).expect("spawn syswatch-daemon");
+    let child = spawn_daemon(socket).expect("spawn wok-daemon");
     wait_for_exit(child, Duration::from_secs(5))
 }
 

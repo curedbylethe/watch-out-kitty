@@ -3,9 +3,9 @@ use syswatch_core::{
     report::ProcessSort,
 };
 
-pub const USAGE: &str = "Usage: syswatch <COMMAND>
+pub const USAGE: &str = "Usage: wok <COMMAND>
 
-Client for the syswatch daemon. Only close can request a process action.
+Client for the wok daemon. Only close can request a process action.
 
 Commands:
   status  Show CPU, memory and process freshness from the running daemon
@@ -21,16 +21,16 @@ Options:
   -h, --help  Show this help
   -V, --version  Print the version and exit";
 
-pub const VERSION: &str = concat!("syswatch ", env!("CARGO_PKG_VERSION"));
+pub const VERSION: &str = concat!("wok ", env!("CARGO_PKG_VERSION"));
 
-pub const TOP_USAGE: &str = "Usage: syswatch top [--sort memory|cpu] [--limit N]
+pub const TOP_USAGE: &str = "Usage: wok top [--sort memory|cpu] [--limit N]
 
 Options:
   --sort memory|cpu  Process order (default: memory)
   --limit N           Maximum rows, positive integer (default: 10)
   -h, --help          Show this help";
 
-pub const SUGGESTIONS_USAGE: &str = "Usage: syswatch suggestions
+pub const SUGGESTIONS_USAGE: &str = "Usage: wok suggestions
 
 Show cached advisory findings for review. Findings are advisory only;
 this command never acts on a process.
@@ -38,7 +38,7 @@ this command never acts on a process.
 Options:
   -h, --help  Show this help";
 
-pub const CLOSE_USAGE: &str = "Usage: syswatch close <finding-reference>
+pub const CLOSE_USAGE: &str = "Usage: wok close <finding-reference>
 
 Preview one advisory finding, then request one SIGTERM after you type yes.
 Needs an interactive terminal. A requested signal is not a confirmed exit.
@@ -49,7 +49,7 @@ Arguments:
 Options:
   -h, --help           Show this help";
 
-pub const INSPECT_USAGE: &str = "Usage: syswatch inspect <finding-reference>
+pub const INSPECT_USAGE: &str = "Usage: wok inspect <finding-reference>
 
 Print the cached evidence for one advisory finding.
 
@@ -59,7 +59,7 @@ Arguments:
 Options:
   -h, --help           Show this help";
 
-pub const UPDATE_USAGE: &str = "Usage: syswatch update <COMMAND>
+pub const UPDATE_USAGE: &str = "Usage: wok update <COMMAND>
 
 Sub-commands for the update notice printed by status. Dismissal is durable
 across restarts until a newer version appears.
@@ -88,15 +88,15 @@ pub enum Command {
 }
 
 fn usage_error(message: &str) -> String {
-    format!("{USAGE}\n\nsyswatch: {message}")
+    format!("{USAGE}\n\nwok: {message}")
 }
 
 fn close_usage_error(message: &str) -> String {
-    format!("{CLOSE_USAGE}\n\nsyswatch: {message}")
+    format!("{CLOSE_USAGE}\n\nwok: {message}")
 }
 
 fn update_usage_error(message: &str) -> String {
-    format!("{UPDATE_USAGE}\n\nsyswatch: {message}")
+    format!("{UPDATE_USAGE}\n\nwok: {message}")
 }
 
 pub fn parse(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Command, String> {
@@ -191,7 +191,7 @@ fn parse_close(args: impl IntoIterator<Item = std::ffi::OsString>) -> Result<Com
         .map_err(|message| close_usage_error(&message))
 }
 
-/// Parses `<pid>-<start_time_secs>-<kind>`, the form `syswatch suggestions`
+/// Parses `<pid>-<start_time_secs>-<kind>`, the form `wok suggestions`
 /// prints. Fields are checked in order; the first failure wins.
 fn parse_reference(value: &str) -> Result<FindingId, String> {
     const SHAPE: &str = "invalid finding reference: expected pid-start_time_secs-kind";
@@ -290,7 +290,7 @@ mod tests {
         CLOSE_USAGE, Command, INSPECT_USAGE, SUGGESTIONS_USAGE, TOP_USAGE, UPDATE_USAGE, USAGE,
         VERSION, parse,
     };
-    const USAGE_MARKER: &str = "syswatch:";
+    const USAGE_MARKER: &str = "wok:";
     use syswatch_core::{
         findings::{FindingId, FindingKind},
         report::ProcessSort,
@@ -350,7 +350,7 @@ mod tests {
     #[test]
     fn version_text_carries_the_crate_version() {
         assert_eq!(
-            VERSION.strip_prefix("syswatch "),
+            VERSION.strip_prefix("wok "),
             Some(env!("CARGO_PKG_VERSION"))
         );
     }
@@ -521,7 +521,7 @@ mod tests {
             Ok(Command::UpdateDismiss)
         );
         assert!(USAGE.contains("  update  "), "{USAGE}");
-        assert!(UPDATE_USAGE.contains("Usage: syswatch update <COMMAND>"));
+        assert!(UPDATE_USAGE.contains("Usage: wok update <COMMAND>"));
         assert!(UPDATE_USAGE.contains("  dismiss  "), "{UPDATE_USAGE}");
     }
 
