@@ -91,7 +91,7 @@ wok --version
 - `update dismiss` silences the current update notice. It prints `dismissed update notice for 1.2.3`, or `no update to dismiss` when the daemon reports no newer release.
 - `--version` prints the build version, for example `wok 0.1.0`.
 
-`wok --help` lists the commands, and `wok top --help` spells out its flags.
+`wok --help`, `wok -h` and `wok help` print the same block: the commands, the global options and the exit codes. Every command answers `-h`/`--help` with its own block, `wok help <COMMAND>` prints one command's block, and `-v` is not a version flag; use `-V` or `--version`.
 
 Exit status is `0` for success, `1` for a runtime failure such as a missing daemon, and `2` for a usage error.
 
