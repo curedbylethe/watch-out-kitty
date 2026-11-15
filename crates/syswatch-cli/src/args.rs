@@ -218,12 +218,29 @@ fn parse_help(
     args: impl IntoIterator<Item = std::ffi::OsString>,
 ) -> Result<Command, String> {
     let mut args = args.into_iter();
-    match args.next() {
-        None => Ok(Command::Help),
-        Some(topic) if command == "help" && topic == "close" && args.next().is_none() => {
-            Ok(Command::CloseHelp)
-        }
-        Some(_) => Err(usage_error(&format!("{command} accepts no arguments"))),
+    let Some(topic) = args.next() else {
+        return Ok(Command::Help);
+    };
+    if command != "help" {
+        return Err(usage_error(&format!("{command} accepts no arguments")));
+    }
+    if args.next().is_some() {
+        return Err(usage_error(
+            "help accepts one command; expected help [<COMMAND>]",
+        ));
+    }
+    match topic.to_string_lossy().as_ref() {
+        "status" => Ok(Command::StatusHelp),
+        "top" => Ok(Command::TopHelp),
+        "suggestions" => Ok(Command::SuggestionsHelp),
+        "inspect" => Ok(Command::InspectHelp),
+        "close" => Ok(Command::CloseHelp),
+        "update" => Ok(Command::UpdateHelp),
+        "version" => Ok(Command::VersionHelp),
+        "help" => Ok(Command::Help),
+        other => Err(usage_error(&format!(
+            "unrecognized help topic: {other}; expected help [<COMMAND>]"
+        ))),
     }
 }
 
@@ -290,10 +307,8 @@ fn parse_suggestions(
     match args.next() {
         None => Ok(Command::Suggestions),
         Some(argument)
-            if matches!(
-                argument.to_string_lossy().as_ref(),
-                "-h" | "--help" | "help"
-            ) && args.next().is_none() =>
+            if matches!(argument.to_string_lossy().as_ref(), "-h" | "--help")
+                && args.next().is_none() =>
         {
             Ok(Command::SuggestionsHelp)
         }
@@ -577,12 +592,58 @@ mod tests {
     }
 
     #[test]
-    fn help_rejects_extra_arguments_as_help_usage() {
-        assert!(
-            parse(args(&["help", "extra"]))
-                .unwrap_err()
-                .contains("help accepts no arguments")
-        );
+    fn lowercase_v_is_an_unknown_argument() {
+        let error = parse(args(&["-v"])).unwrap_err();
+        assert!(error.contains("unrecognized command: -v"), "{error}");
+        assert!(error.contains(USAGE), "usage missing from {error}");
+    }
+
+    #[test]
+    fn no_block_documents_lowercase_v() {
+        for block in BLOCKS {
+            assert!(!block.contains("-v,"), "{block}");
+        }
+    }
+
+    #[test]
+    fn help_rejects_an_unknown_topic_or_a_second_argument() {
+        let error = parse(args(&["help", "extra"])).unwrap_err();
+        assert!(error.contains("unrecognized help topic: extra"), "{error}");
+        assert!(error.contains("help [<COMMAND>]"), "{error}");
+        let error = parse(args(&["help", "status", "extra"])).unwrap_err();
+        assert!(error.contains("help [<COMMAND>]"), "{error}");
+    }
+
+    #[test]
+    fn help_topic_resolves_every_command() {
+        for (topic, expected) in [
+            ("status", Command::StatusHelp),
+            ("top", Command::TopHelp),
+            ("suggestions", Command::SuggestionsHelp),
+            ("inspect", Command::InspectHelp),
+            ("close", Command::CloseHelp),
+            ("update", Command::UpdateHelp),
+            ("version", Command::VersionHelp),
+            ("help", Command::Help),
+        ] {
+            assert_eq!(parse(args(&["help", topic])), Ok(expected), "{topic}");
+        }
+    }
+
+    #[test]
+    fn the_bare_word_help_is_rejected_after_every_command() {
+        for values in [
+            &["status", "help"][..],
+            &["top", "help"],
+            &["suggestions", "help"],
+            &["inspect", "help"],
+            &["close", "help"],
+            &["version", "help"],
+            &["update", "dismiss", "help"],
+        ] {
+            let error = parse(args(values)).unwrap_err();
+            assert!(error.contains(USAGE_MARKER), "{values:?}: {error}");
+        }
     }
 
     #[test]
@@ -648,7 +709,7 @@ mod tests {
 
     #[test]
     fn suggestions_help_is_accepted() {
-        for spelling in ["--help", "-h", "help"] {
+        for spelling in ["--help", "-h"] {
             assert_eq!(
                 parse(args(&["suggestions", spelling])),
                 Ok(Command::SuggestionsHelp)
