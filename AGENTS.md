@@ -30,11 +30,12 @@ cargo test --workspace
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 python3 -m unittest discover -s kitty -t kitty -p 'test_*.py'
+python3 -m unittest discover -s tests -t tests -p 'test_*.py'
 ```
 
 Add or update relevant tests for behavior changes. CI runs formatting, Clippy,
-tests, and the Python client suite (Python 3.15) on Ubuntu 24.04; it does not
-run a separate build job.
+tests, the Python client suite, and the installer suite (Python 3.15) on
+Ubuntu 24.04; it does not run a separate build job.
 
 One version governs the workspace: the `[workspace.package] version` in the root
 manifest, which every crate inherits. `wok --version` and the daemon startup
@@ -44,11 +45,12 @@ GitHub release with generated notes. That workflow is the only publisher.
 
 The Python suite is part of the gate. It runs headless and must stay standard
 library only. It must not require Kitty, a display, a running daemon, the
-user's socket path, or network access; use fakes and temporary sockets. Behavior
-that needs a real Kitty session (rendering, repaint cadence, themes, single-tab
-visibility, config reload) is verified by the manual checklist in
-`docs/kitty-adapter.md` and recorded in the pull request, never by a skipped
-test.
+user's socket path, or network access; use fakes and temporary sockets. The
+installer suite stubs the download and uses a temporary `HOME`. It is the only
+suite that runs a subprocess. Behavior that needs a real Kitty session
+(rendering, repaint cadence, themes, single-tab visibility, config reload) is
+verified by the manual checklist in `docs/kitty-adapter.md` and recorded in the
+pull request, never by a skipped test.
 
 ## Data semantics
 
