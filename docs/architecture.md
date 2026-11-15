@@ -8,6 +8,17 @@ process-ranking, and advisory findings output. The Rust core is independent of K
 rendering, daemon runtime, and CLI frameworks. Run
 `cargo run -p syswatch-core --example snapshot` for one diagnostic snapshot.
 
+## Update check
+
+The daemon reads the build version from one workspace value and reports it in
+`syswatch --version` and in its startup line. It checks once at startup and then
+once a day whether GitHub publishes a newer release. The check runs on its own
+thread and never delays sampling or a reply. It makes one bounded request with a
+3-second deadline, sends no machine identifier, and stays silent on every
+failure: offline, DNS failure, and rate limiting print nothing and are not
+retried before the next daily check. Set `SYSWATCH_DISABLE_UPDATE_CHECK=1` to
+stop the check entirely.
+
 ## Module map
 
 | Path | Contents |

@@ -162,7 +162,9 @@ A newer release appears in three places:
 - `syswatch status` adds one line naming the version and the release URL. The line suggests `syswatch update dismiss`.
 - The tab bar ends with one caret: `CPU 18%  RAM 42% ^`, or `CPU 18%  RAM 42%  !2 ^` beside an advisory badge. The caret is passive; it opens nothing and sends no signal.
 
-Set `SYSWATCH_DISABLE_UPDATE_CHECK=1` to stop the check entirely.
+The daemon asks GitHub for the latest release once at startup and then once a
+day, and the request carries nothing about the machine. Set
+`SYSWATCH_DISABLE_UPDATE_CHECK=1` to stop the check entirely.
 
 Each version prompts at most once. `syswatch update dismiss` records the noticed version in a one-key file: `$SYSWATCH_UPDATE_STATE` when set to an absolute path, otherwise `$XDG_STATE_HOME/syswatch/update.json`, otherwise `~/.local/state/syswatch/update.json`. A dismissal survives a daemon restart and hides the notice until a newer release appears; then the notice returns. Remove the file to restore the notice.
 
