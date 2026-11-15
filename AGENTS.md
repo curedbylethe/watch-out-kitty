@@ -37,7 +37,7 @@ tests, and the Python client suite (Python 3.15) on Ubuntu 24.04; it does not
 run a separate build job.
 
 One version governs the workspace: the `[workspace.package] version` in the root
-manifest, which every crate inherits. `syswatch --version` and the daemon startup
+manifest, which every crate inherits. `wok --version` and the daemon startup
 line both read it, so a release changes one value. Releases are tags of the form
 `vMAJOR.MINOR.PATCH`; pushing one makes `.github/workflows/release.yml` create a
 GitHub release with generated notes. That workflow is the only publisher.
@@ -57,7 +57,7 @@ Memory fields and process memory use bytes. Usage fields are percentages.
 The first CPU sample is a warm-up and is not representative; CPU sampling
 requires an interval between refreshes. Per-process CPU can exceed 100% when a
 process uses multiple cores. Process identity is `(pid, start_time_secs)`;
-operating systems reuse PIDs. A finding reference is `pid-start_time_secs-kind`; `syswatch inspect`
+operating systems reuse PIDs. A finding reference is `pid-start_time_secs-kind`; `wok inspect`
 matches the full identity, so a reference cannot select a process whose PID was reused. The command is
 read-only and performs no process action. Process names use lossy decoding and may contain
 replacement characters.
@@ -105,9 +105,9 @@ output, no retry before the next interval. The request carries a fixed user agen
 and the release feed URL, nothing about the machine, and sends no telemetry.
 `status` reports the result as the additive optional `update` field, and the
 adapter shows one caret. Dismissal is a one-key file owned by the core, written by
-`syswatch update dismiss` and re-read once per process tick; the daemon holds it
+`wok update dismiss` and re-read once per process tick; the daemon holds it
 in memory otherwise. A dismissal hides the notice until a newer release appears.
-`SYSWATCH_DISABLE_UPDATE_CHECK` turns the check off. The check requests no process
+`WOK_DISABLE_UPDATE_CHECK` turns the check off. The check requests no process
 action and never authorizes one.
 
 ## Process lifecycle policy
@@ -135,7 +135,7 @@ whichever process holds the PID at delivery. Prohibited: SIGKILL, retry,
 escalation, force, sudo, bulk actions, and advisor-triggered actions. Admission
 by preflight is not permission for any of them.
 
-`syswatch close` is the only command that may lead to a signal. It requires an interactive terminal
+`wok close` is the only command that may lead to a signal. It requires an interactive terminal
 and an exact `yes` at the prompt. Background sampling, advisory findings, the release check, and
 Kitty rendering stay read-only; the release check makes the one documented outbound request and
 nothing else leaves the machine. A requested signal is not an exit: report it as a request, never as

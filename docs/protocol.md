@@ -24,8 +24,8 @@ and `url` when the daemon found a newer release. Both are additive: version `1`
 is unchanged, an older daemon omits them, and a reader that does not know them
 ignores them. The fields are informational. They never carry a process action.
 
-`syswatch inspect` reads the same cached reply and adds no request type; a finding reference is not a
-wire field and adds nothing to the reply. `syswatch close` adds two requests, `close_preview`
+`wok inspect` reads the same cached reply and adds no request type; a finding reference is not a
+wire field and adds nothing to the reply. `wok close` adds two requests, `close_preview`
 and `close_confirm`. Each carries one complete `finding` object and nothing else. Monitoring
 requests reject a `finding` field. The close requests are additive, so the version remains
 `1`; an older daemon answers `unsupported_command`.
@@ -84,5 +84,5 @@ A suggestions reply carries finding identity, confidence, timestamps,
 explanation, and aggregate numeric evidence; it contains no process names,
 paths, argv, or environment data. Types live in `syswatch_core::protocol`.
 
-`syswatch status` shows `warming up` before the first CPU sample and `not yet
+`wok status` shows `warming up` before the first CPU sample and `not yet
 sampled` before the first process scan. Displayed ages use the sample times.
